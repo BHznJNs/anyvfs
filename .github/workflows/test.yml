@@ -1,0 +1,84 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.14"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --all-groups --python "${{ matrix.python-version }}"
+      - name: Lint Python sources
+        run: uv run --no-sync ruff check src scripts
+      - name: Check Python formatting
+        run: uv run --no-sync ruff format --check src scripts
+      - name: Build Python distributions
+        run: uv build --no-sources
+      - name: Smoke test the installed wheel
+        run: |
+          uv run --isolated --no-project --python "${{ matrix.python-version }}" --with ./dist/*.whl python -I - <<'PY'
+          from vfspy._rpc import session_pb2 as pb
+          from vfspy._rpc import session_pb2_grpc as rpc
+
+          config = pb.Config(case_sensitive=True, max_file_bytes=1024, max_total_bytes=4096)
+          assert pb.Config.FromString(config.SerializeToString()) == config
+          assert callable(rpc.ControllerStub)
+          assert callable(rpc.add_ControllerServicer_to_server)
+          PY
+
+  native:
+    name: Go / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      CGO_ENABLED: ${{ matrix.os == 'windows-latest' && '0' || '1' }}
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: native/go.mod
+          check-latest: true
+          cache-dependency-path: native/go.sum
+      - name: Install FUSE build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfuse-dev pkg-config
+      - name: Run Go tests
+        run: go test -mod=readonly ./...
+      - name: Run Go vet
+        run: go vet -mod=readonly ./...
+      - name: Build native bridge
+        run: go build -mod=readonly -trimpath -o ../bin/vfspy-native${{ runner.os == 'Windows' && '.exe' || '' }} .
