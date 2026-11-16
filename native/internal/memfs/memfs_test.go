@@ -18,9 +18,9 @@ func newFS(t *testing.T, sensitive bool, file, total int64) *FS {
 	}
 	return f
 }
-func seed(t *testing.T, f *FS, p string, data []byte, dir bool) {
+func addInitialEntry(t *testing.T, f *FS, p string, data []byte, dir bool) {
 	t.Helper()
-	if err := f.Seed(&pb.InitialEntry{Path: p, Data: data, Directory: dir}); err != nil {
+	if err := f.AddInitialEntry(&pb.InitialEntry{Path: p, Data: data, Directory: dir}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -42,8 +42,8 @@ func read(t *testing.T, f *FS, h uint64) []byte {
 
 func TestHandlesSurviveRenameReplacementAndUnlink(t *testing.T) {
 	f := newFS(t, true, 1024, 2048)
-	seed(t, f, "/a", []byte("original"), false)
-	seed(t, f, "/b", []byte("target"), false)
+	addInitialEntry(t, f, "/a", []byte("original"), false)
+	addInitialEntry(t, f, "/b", []byte("target"), false)
 	c, a := f.Open("/a", fuse.O_RDWR)
 	mustCode(t, c, 0)
 	c, b := f.Open("/b", fuse.O_RDWR)
@@ -95,7 +95,7 @@ func TestSparseTruncateAppendAndEventCopy(t *testing.T) {
 }
 func TestQuotasCountUnlinkedOpenFilesAndFailedOperations(t *testing.T) {
 	f := newFS(t, true, 8, 10)
-	seed(t, f, "/a", []byte("12345678"), false)
+	addInitialEntry(t, f, "/a", []byte("12345678"), false)
 	c, a := f.Open("/a", fuse.O_RDWR)
 	mustCode(t, c, 0)
 	mustCode(t, f.Unlink("/a"), 0)
@@ -114,8 +114,8 @@ func TestQuotasCountUnlinkedOpenFilesAndFailedOperations(t *testing.T) {
 }
 func TestDirectoryRenameAndEnumerationSnapshot(t *testing.T) {
 	f := newFS(t, false, 64, 128)
-	seed(t, f, "/Dir", nil, true)
-	seed(t, f, "/Dir/a", []byte("a"), false)
+	addInitialEntry(t, f, "/Dir", nil, true)
+	addInitialEntry(t, f, "/Dir/a", []byte("a"), false)
 	c, h := f.Open("/dir/A", fuse.O_RDWR)
 	mustCode(t, c, 0)
 	c, d := f.Opendir("/Dir")
@@ -170,7 +170,7 @@ func TestConcurrentAppendAndBarrierOrdering(t *testing.T) {
 }
 func TestMetadataAndNoOpEvents(t *testing.T) {
 	f := newFS(t, true, 64, 64)
-	seed(t, f, "/a", []byte("a"), false)
+	addInitialEntry(t, f, "/a", []byte("a"), false)
 	c, h := f.Open("/a", fuse.O_RDONLY)
 	mustCode(t, c, 0)
 	mustCode(t, f.Flush("", h), 0)

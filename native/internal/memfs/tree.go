@@ -245,19 +245,19 @@ func (f *FS) Init() {
 	}
 }
 
-// Seed is only used before mounting; it deliberately emits no mutation events.
-func (f *FS) Seed(e *pb.InitialEntry) error {
+// AddInitialEntry is only used before mounting; it deliberately emits no mutation events.
+func (f *FS) AddInitialEntry(e *pb.InitialEntry) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if e == nil {
 		return fmt.Errorf("nil initial entry")
 	}
 	if _, c := f.lookup(e.Path); c == 0 {
-		return fmt.Errorf("duplicate seed path: %s", e.Path)
+		return fmt.Errorf("duplicate initial path: %s", e.Path)
 	}
 	parent, name, c := f.parent(e.Path)
 	if c != 0 {
-		return fmt.Errorf("invalid seed parent: %s (%d)", e.Path, c)
+		return fmt.Errorf("invalid initial entry parent: %s (%d)", e.Path, c)
 	}
 	mode := uint32(fuse.S_IFREG | 0644)
 	if e.Directory {
@@ -269,7 +269,7 @@ func (f *FS) Seed(e *pb.InitialEntry) error {
 	}
 	if !e.Directory {
 		if c = f.resize(n, int64(len(e.Data))); c != 0 {
-			return fmt.Errorf("seed exceeds memory limits: %d", c)
+			return fmt.Errorf("initial entry exceeds memory limits: %d", c)
 		}
 		copy(n.data, e.Data)
 	}

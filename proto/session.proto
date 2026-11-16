@@ -4,7 +4,7 @@ option go_package = "vfspy/native/internal/rpc;rpc";
 
 // No filesystem read/write RPC: OS requests execute entirely in Go memory.
 service Controller {
-  rpc Bootstrap(Empty) returns (stream Seed);
+  rpc Bootstrap(Empty) returns (stream BootstrapItem);
   rpc Session(stream Notice) returns (stream Command);
 }
 message Empty {}
@@ -14,7 +14,7 @@ message Config {
   int64 max_total_bytes = 3;
 }
 message InitialEntry { string path = 1; bool directory = 2; bytes data = 3; }
-message Seed { oneof value { Config config = 1; InitialEntry entry = 2; } }
+message BootstrapItem { oneof value { Config config = 1; InitialEntry entry = 2; } }
 message Ready {}
 message Stopped {}
 message Barrier { uint64 id = 1; }

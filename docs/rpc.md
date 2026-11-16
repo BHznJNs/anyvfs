@@ -8,7 +8,7 @@
 
 | 完整 RPC 路径 | 请求 | 响应 | 流类型 | 用途 |
 | --- | --- | --- | --- | --- |
-| `/vfspy.Controller/Bootstrap` | `Empty`，Go → 控制进程 | `Seed`，控制进程 → Go | unary → stream | 一次性下发配置和初始文件树 |
+| `/vfspy.Controller/Bootstrap` | `Empty`，Go → 控制进程 | `BootstrapItem`，控制进程 → Go | unary → stream | 一次性下发配置和初始文件树 |
 | `/vfspy.Controller/Session` | `Notice` 流，Go → 控制进程 | `Command` 流，控制进程 → Go | stream ↔ stream | 挂载状态、变更通知、同步屏障及停止命令 |
 
 全部接口只有以上两个 RPC。没有单独的文件读、写、列表、快照、健康检查或日志 RPC；文件访问通过挂载路径进行。
@@ -20,9 +20,9 @@
 Go 发送 `Empty {}`，使用 `--startup-timeout` 指定 deadline，覆盖 Bootstrap 调用及完整响应流接收，不覆盖后续挂载或长期 Session。该选项不能作为整个进程的退出超时。控制服务按顺序返回：
 
 ```text
-Seed(config=Config(...))
-Seed(entry=InitialEntry(path="/docs", directory=true))
-Seed(entry=InitialEntry(path="/docs/guide.txt", data=<bytes>))
+BootstrapItem(config=Config(...))
+BootstrapItem(entry=InitialEntry(path="/docs", directory=true))
+BootstrapItem(entry=InitialEntry(path="/docs/guide.txt", data=<bytes>))
 ... EOF（正常结束 Bootstrap 响应流）
 ```
 
@@ -39,8 +39,8 @@ Seed(entry=InitialEntry(path="/docs/guide.txt", data=<bytes>))
 | `InitialEntry` | `path: string = 1` | 挂载根内的绝对路径，例如 `/hello.txt`；使用 `/`，不是宿主机路径或盘符。 |
 | `InitialEntry` | `directory: bool = 2` | true 为目录，false 为普通文件。 |
 | `InitialEntry` | `data: bytes = 3` | 普通文件的初始完整二进制内容；目录必须为空。不做文本编码转换。 |
-| `Seed` | `config: Config = 1` | `oneof value` 的配置分支，只出现在第一条。 |
-| `Seed` | `entry: InitialEntry = 2` | `oneof value` 的条目分支，出现在配置之后。 |
+| `BootstrapItem` | `config: Config = 1` | `oneof value` 的配置分支，只出现在第一条。 |
+| `BootstrapItem` | `entry: InitialEntry = 2` | `oneof value` 的条目分支，出现在配置之后。 |
 
 路径组件不能为空、`.` 或 `..`，组件长度至多 255 字节，禁止反斜杠、冒号、NUL、`< > " | ? *`，禁止以点或空格结尾。使用规范路径，禁止重复 `/`、尾随 `/`；`/` 是已存在的根目录，不能作为新条目。初始文件 mode 为 `S_IFREG | 0644`，目录为 `S_IFDIR | 0755`，没有初始 mode/uid/gid/时间字段。
 
@@ -84,7 +84,7 @@ Bootstrap 正常结束后，Go 建立一条长期双向流，再执行挂载。�
 
 | 字段 | 类型 / 字段号 | 含义 |
 | --- | --- | --- |
-| `revision` | `uint64 = 1` | 每个新文件系统从 1 开始，提交一个 Event 增加 1；控制消息和 seed 不占 revision。 |
+| `revision` | `uint64 = 1` | 每个新文件系统从 1 开始，提交一个 Event 增加 1；初始化消息和控制消息不占 revision。 |
 | `time_ns` | `int64 = 2` | Go 提交事件时的 Unix epoch 纳秒时间；系统时钟可能调整，排序应使用 revision。 |
 | `inode` | `uint64 = 3` | 变更目标的 inode，本次会话内分配；重命名后不变，进程重启后不保证一致。 |
 

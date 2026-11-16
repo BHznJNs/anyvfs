@@ -47,12 +47,12 @@ func run() error {
 	ctx, cancel := context.WithCancel(metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+token))
 	defer cancel()
 	startup, cancelStartup := context.WithTimeout(ctx, *timeout)
-	seed, err := client.Bootstrap(startup, &pb.Empty{})
+	bootstrap, err := client.Bootstrap(startup, &pb.Empty{})
 	if err != nil {
 		cancelStartup()
 		return err
 	}
-	first, err := seed.Recv()
+	first, err := bootstrap.Recv()
 	if err != nil {
 		cancelStartup()
 		return err
@@ -64,7 +64,7 @@ func run() error {
 	}
 	entries := 0
 	for {
-		item, e := seed.Recv()
+		item, e := bootstrap.Recv()
 		if e == io.EOF {
 			break
 		}
@@ -72,7 +72,7 @@ func run() error {
 			cancelStartup()
 			return e
 		}
-		if e = fs.Seed(item.GetEntry()); e != nil {
+		if e = fs.AddInitialEntry(item.GetEntry()); e != nil {
 			cancelStartup()
 			return e
 		}
