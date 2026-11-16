@@ -6,8 +6,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build distribution
+  build-sdist:
+    name: Build source distribution
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -19,20 +19,50 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
-      - name: Build wheel and source distribution
-        run: uv build --no-sources
+      - name: Build source distribution
+        run: uv build --sdist --no-sources
       - name: Check distribution metadata
         run: uvx twine check --strict dist/*
       - name: Store distribution packages
         uses: actions/upload-artifact@v7
         with:
-          name: python-package-distributions
+          name: python-package-sdist
           path: dist/
+          if-no-files-found: error
+
+  build-wheels:
+    name: Build wheel / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        if: runner.os == 'Windows'
+        with:
+          go-version: "1.27.4"
+          cache-dependency-path: native/go.sum
+      - name: Build wheels with bundled Go bridge
+        uses: pypa/cibuildwheel@v4.3.5
+        with:
+          output-dir: dist
+      - uses: astral-sh/setup-uv@v10.3.3
+      - name: Check distribution metadata
+        run: uvx twine check --strict dist/*
+      - name: Store wheel packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-package-wheels-${{ matrix.os }}
+          path: dist/*.whl
           if-no-files-found: error
 
   publish-to-pypi:
     name: Publish to PyPI
-    needs: build
+    needs: [build-sdist, build-wheels]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -43,7 +73,8 @@ jobs:
       - name: Download distribution packages
         uses: actions/download-artifact@v8
         with:
-          name: python-package-distributions
+          pattern: python-package-*
+          merge-multiple: true
           path: dist/
       - name: Publish distribution
         uses: pypa/gh-action-pypi-publish@release/v1

@@ -8,14 +8,13 @@ Go 程序负责内存中的目录树、文件内容、inode、句柄、容量限
 
 以下 Python 示例均在项目根目录执行。使用当前 Python 解释器调用统一构建脚本：
 
-```python
-import subprocess
-import sys
-
-subprocess.run([sys.executable, "scripts/build_bridge.py"], check=True)
+```shell
+python scripts/build_bridge.py
 ```
 
-脚本会自动创建 `bin/` 目录，调用 `go build -trimpath`，并在成功后打印产物的绝对路径。Windows 产物为 `bin/vfspy-native.exe`，其他平台为 `bin/vfspy-native`。脚本不接收命令行参数。
+脚本会自动创建 `bin/` 目录，调用 `go build -mod=readonly -trimpath`，并在成功后打印产物的绝对路径。Windows 产物为 `bin/vfspy-native.exe`，其他平台为 `bin/vfspy-native`。脚本不接收命令行参数。
+
+构建 Python wheel 时会自动编译 bridge 并打包到 `vfspy/_bin/`。
 
 构建需要 Python 3.11+ 和 Go 工具链，`go` 命令需在 PATH 中。Windows 下脚本自动设置 `CGO_ENABLED=0`；其他平台使用 Go 默认环境，需要相应的 FUSE 运行库、开发头文件和 C 工具链。Windows 实际挂载需要安装 WinFsp 运行时。
 
