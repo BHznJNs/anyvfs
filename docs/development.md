@@ -1,5 +1,26 @@
 # 开发说明
 
+## 协议生成
+
+生成脚本需要 Go 和开发依赖，使用固定的 `grpcio-tools==1.78.0`、`protoc-gen-go@v1.36.6`、`protoc-gen-go-grpc@v1.5.1`，首次安装 Go 生成器需要下载依赖。Python 和 Go 的 RPC 生成文件不纳入 Git；首次检出或修改 `proto/session.proto` 后，需在导入 Python 绑定、运行 Go 测试或构建前执行生成脚本：
+
+```console
+uv run python scripts/generate_proto.py
+```
+
+wheel 包含 Python 绑定，sdist 包含 Python 和 Go 绑定，因此安装发布包无需重新生成 RPC 代码；从 sdist 构建 wheel 仍需 Go 工具链和对应平台的 FUSE 开发依赖。
+
+## Python 测试与检查
+
+```console
+uv sync --locked --all-groups
+uv run --no-sync python -m unittest discover -s tests -v
+uv run --no-sync ruff check src scripts tests
+uv run --no-sync ruff format --check src scripts tests
+```
+
+首次检出需先生成 RPC 绑定。测试命令自动发现并运行 `tests/` 下的全部 Python 测试；当前覆盖 RPC 协议交互、Pydantic 配置校验与不可变性，无需挂载或安装 WinFsp/FUSE。
+
 ## 构建
 
 构建 Go 需要 Go 工具链；运行挂载还需要 WinFsp/FUSE。
@@ -33,13 +54,3 @@ bridge = files("vfspy").joinpath("_bin", "vfspy-native.exe" if os.name == "nt" e
 ```
 
 wheel 使用 `py3-none-<platform>` 标签，支持 Python 3.11+，不绑定特定 CPython ABI。安装 wheel 不需要 Go 工具链，实际挂载仍需 WinFsp/FUSE 运行时。
-
-## 协议生成
-
-生成脚本需要 Go 和开发依赖，使用固定的 `grpcio-tools==1.78.0`、`protoc-gen-go@v1.36.6`、`protoc-gen-go-grpc@v1.5.1`，首次安装 Go 生成器需要下载依赖。Python 和 Go 的 RPC 生成文件不纳入 Git；首次检出或修改 `proto/session.proto` 后，需在导入 Python 绑定、运行 Go 测试或构建前执行生成脚本：
-
-```console
-uv run python scripts/generate_proto.py
-```
-
-测试和发布 CI 会在测试、构建前生成两种语言的绑定。wheel 包含 Python 绑定，sdist 包含 Python 和 Go 绑定，因此安装发布包无需重新生成 RPC 代码；从 sdist 构建 wheel 仍需 Go 工具链和对应平台的 FUSE 开发依赖。

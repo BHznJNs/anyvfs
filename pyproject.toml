@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Generated gRPC bindings for the vfspy native filesystem bridge"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["grpcio>=1.78,<2", "protobuf>=6.31.1,<7"]
+dependencies = ["grpcio>=1.78,<2", "protobuf>=6.31.1,<7", "pydantic>=2.10,<3"]
 
 [dependency-groups]
 dev = ["grpcio-tools==1.78.0", "ruff>=0.11,<1"]
@@ -21,7 +21,19 @@ artifacts = ["src/vfspy/_rpc"]
 path = "scripts/hatch_build.py"
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "native", "proto", "scripts", "examples", "tests", "README.md", "docs", "pyproject.toml", "uv.lock", ".python-version"]
+include = [
+    "src",
+    "native",
+    "proto",
+    "scripts",
+    "examples",
+    "tests",
+    "README.md",
+    "docs",
+    "pyproject.toml",
+    "uv.lock",
+    ".python-version",
+]
 artifacts = ["src/vfspy/_rpc", "native/internal/rpc"]
 
 [tool.cibuildwheel]
