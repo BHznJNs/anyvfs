@@ -15,12 +15,14 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vfspy"]
+artifacts = ["src/vfspy/_rpc"]
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "scripts/hatch_build.py"
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "native", "proto", "scripts", "examples", "tests", "README.md", "docs", "pyproject.toml", "uv.lock", ".python-version"]
+artifacts = ["src/vfspy/_rpc", "native/internal/rpc"]
 
 [tool.cibuildwheel]
 # The bridge does not use the Python ABI: one py3-none wheel per platform suffices.

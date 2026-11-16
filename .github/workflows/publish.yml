@@ -19,6 +19,14 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: native/go.mod
+          cache-dependency-path: native/go.sum
+      - name: Install RPC generation dependencies
+        run: uv sync --locked --only-group dev --no-install-project
+      - name: Generate RPC bindings
+        run: uv run --no-sync python scripts/generate_proto.py
       - name: Build source distribution
         run: uv build --sdist --no-sources
       - name: Check distribution metadata
@@ -42,15 +50,23 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@v7
-        if: runner.os == 'Windows'
         with:
           go-version: "1.27.4"
           cache-dependency-path: native/go.sum
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+      - name: Install RPC generation dependencies
+        run: uv sync --locked --only-group dev --no-install-project
+      - name: Generate RPC bindings
+        run: uv run --no-sync python scripts/generate_proto.py
       - name: Build wheels with bundled Go bridge
         uses: pypa/cibuildwheel@v4.3.5
         with:
           output-dir: dist
-      - uses: astral-sh/setup-uv@v10.3.3
       - name: Check distribution metadata
         run: uvx twine check --strict dist/*
       - name: Store wheel packages

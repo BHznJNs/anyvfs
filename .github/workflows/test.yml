@@ -41,6 +41,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev pkg-config
       - name: Install dependencies
         run: uv sync --locked --all-groups --python "${{ matrix.python-version }}"
+      - name: Generate RPC bindings
+        run: uv run --no-sync python scripts/generate_proto.py
       - name: Lint Python sources
         run: uv run --no-sync ruff check src scripts
       - name: Check Python formatting
@@ -80,6 +82,18 @@ jobs:
           go-version-file: native/go.mod
           check-latest: true
           cache-dependency-path: native/go.sum
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+      - name: Install RPC generation dependencies
+        working-directory: .
+        run: uv sync --locked --only-group dev --no-install-project
+      - name: Generate RPC bindings
+        working-directory: .
+        run: uv run --no-sync python scripts/generate_proto.py
       - name: Install FUSE build dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev pkg-config

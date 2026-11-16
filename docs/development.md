@@ -5,6 +5,8 @@
 构建 Go 需要 Go 工具链；运行挂载还需要 WinFsp/FUSE。
 
 ```console
+uv sync --locked --all-groups
+uv run --no-sync python scripts/generate_proto.py
 uv run python scripts/build_bridge.py
 uv build
 ```
@@ -17,7 +19,7 @@ uv build
 uvx cibuildwheel==4.3.5 --output-dir dist
 ```
 
-Windows 需先将 Go 加入 PATH；Linux wheel 构建需运行 Docker。cibuildwheel 未配置额外测试命令。
+运行 cibuildwheel 前需先生成 RPC 绑定。Windows 需先将 Go 加入 PATH；Linux wheel 构建需运行 Docker。cibuildwheel 未配置额外测试命令。
 
 ### Wheel 发布
 
@@ -34,8 +36,10 @@ wheel 使用 `py3-none-<platform>` 标签，支持 Python 3.11+，不绑定特�
 
 ## 协议生成
 
-生成脚本需要 Go 和开发依赖，使用固定的 `grpcio-tools==1.78.0`、`protoc-gen-go@v1.36.6`、`protoc-gen-go-grpc@v1.5.1`，首次安装 Go 生成器需要下载依赖。现有绑定可直接导入，不必重新生成。
+生成脚本需要 Go 和开发依赖，使用固定的 `grpcio-tools==1.78.0`、`protoc-gen-go@v1.36.6`、`protoc-gen-go-grpc@v1.5.1`，首次安装 Go 生成器需要下载依赖。Python 和 Go 的 RPC 生成文件不纳入 Git；首次检出或修改 `proto/session.proto` 后，需在导入 Python 绑定、运行 Go 测试或构建前执行生成脚本：
 
 ```console
 uv run python scripts/generate_proto.py
 ```
+
+测试和发布 CI 会在测试、构建前生成两种语言的绑定。wheel 包含 Python 绑定，sdist 包含 Python 和 Go 绑定，因此安装发布包无需重新生成 RPC 代码；从 sdist 构建 wheel 仍需 Go 工具链和对应平台的 FUSE 开发依赖。

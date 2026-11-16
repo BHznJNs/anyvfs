@@ -8,3 +8,7 @@ bin/
 .tools/
 .cache/
 *.log
+
+# RPC bindings are regenerated from proto/ before testing and packaging.
+/src/vfspy/_rpc/*
+/native/internal/rpc/*.pb.go

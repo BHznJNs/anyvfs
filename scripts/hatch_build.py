@@ -25,7 +25,8 @@ def _load_build_bridge_module(root: Path) -> _BuildBridgeModule:
 
 class CustomBuildHook(BuildHookInterface):
     def initialize(self, version, build_data):
-        if version == "editable": return
+        if version == "editable":
+            return
 
         # Isolated build environments do not put scripts/ on the import path.
         module = _load_build_bridge_module(Path(self.root))
