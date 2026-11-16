@@ -1,0 +1,56 @@
+syntax = "proto3";
+package vfspy;
+option go_package = "vfspy/native/internal/rpc;rpc";
+
+// No filesystem read/write RPC: OS requests execute entirely in Go memory.
+service Controller {
+  rpc Bootstrap(Empty) returns (stream Seed);
+  rpc Session(stream Notice) returns (stream Command);
+}
+message Empty {}
+message Config {
+  bool case_sensitive = 1;
+  int64 max_file_bytes = 2;
+  int64 max_total_bytes = 3;
+}
+message InitialEntry { string path = 1; bool directory = 2; bytes data = 3; }
+message Seed { oneof value { Config config = 1; InitialEntry entry = 2; } }
+message Ready {}
+message Stopped {}
+message Barrier { uint64 id = 1; }
+message Stop {}
+message Command { oneof value { Stop stop = 1; Barrier barrier = 2; } }
+message Notice {
+  oneof value { Ready ready = 1; Event event = 2; Barrier barrier = 3; Stopped stopped = 4; }
+}
+message FileCreated { string path = 1; uint32 mode = 2; }
+message DirectoryCreated { string path = 1; uint32 mode = 2; }
+message FileWritten {
+  string path = 1; int64 offset = 2; bytes data = 3; int64 size = 4; bool linked = 5;
+}
+message FileTruncated {
+  string path = 1; int64 previous_size = 2; int64 size = 3; bool linked = 4;
+}
+message EntryRenamed {
+  string path = 1; string new_path = 2; bool directory = 3; uint64 replaced_inode = 4;
+}
+message FileRemoved { string path = 1; }
+message DirectoryRemoved { string path = 1; }
+message ModeChanged { string path = 1; uint32 mode = 2; }
+message OwnerChanged { string path = 1; uint32 uid = 2; uint32 gid = 3; }
+message TimesChanged { string path = 1; int64 atime_ns = 2; int64 mtime_ns = 3; }
+message Event {
+  uint64 revision = 1; int64 time_ns = 2; uint64 inode = 3;
+  oneof kind {
+    FileCreated file_created = 10;
+    DirectoryCreated directory_created = 11;
+    FileWritten file_written = 12;
+    FileTruncated file_truncated = 13;
+    EntryRenamed entry_renamed = 14;
+    FileRemoved file_removed = 15;
+    DirectoryRemoved directory_removed = 16;
+    ModeChanged mode_changed = 17;
+    OwnerChanged owner_changed = 18;
+    TimesChanged times_changed = 19;
+  }
+}

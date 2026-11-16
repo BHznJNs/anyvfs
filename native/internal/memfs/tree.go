@@ -1,0 +1,278 @@
+// Package memfs owns all live filesystem data, handles and mutation ordering.
+package memfs
+
+import (
+	"context"
+	"fmt"
+	"path"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/winfsp/cgofuse/fuse"
+	pb "vfspy/native/internal/rpc"
+)
+
+type node struct {
+	name        string
+	parent      *node
+	children    map[string]*node
+	data        []byte
+	stat        fuse.Stat_t
+	refs        int
+	linked      bool
+	removedPath string
+}
+
+func (n *node) dir() bool { return n.children != nil }
+func (n *node) location() string {
+	if !n.linked {
+		return n.removedPath
+	}
+	if n.parent == nil {
+		return "/"
+	}
+	return path.Join(n.parent.location(), n.name)
+}
+
+type directoryEntry struct {
+	name string
+	stat fuse.Stat_t
+}
+type handle struct {
+	n       *node
+	flags   int
+	entries []directoryEntry
+}
+
+type FS struct {
+	fuse.FileSystemBase
+	mu                              sync.Mutex
+	root                            *node
+	handles                         map[uint64]*handle
+	nextInode, nextHandle, revision uint64
+	used                            int64
+	config                          *pb.Config
+	out                             []*pb.Notice
+	wake                            chan struct{}
+	OnInit                          func()
+}
+
+func New(config *pb.Config) (*FS, error) {
+	if config == nil || config.MaxFileBytes <= 0 || config.MaxTotalBytes <= 0 ||
+		config.MaxFileBytes > config.MaxTotalBytes || config.MaxFileBytes > 1<<30 || config.MaxTotalBytes > 1<<40 {
+		return nil, fmt.Errorf("invalid memory limits (require 0 < file <= total, file <= 1 GiB, total <= 1 TiB)")
+	}
+	f := &FS{config: config, handles: make(map[uint64]*handle), wake: make(chan struct{}, 1)}
+	f.root = f.makeNode(nil, "", fuse.S_IFDIR|0755)
+	return f, nil
+}
+func (f *FS) key(s string) string {
+	if f.config.CaseSensitive {
+		return s
+	}
+	return strings.ToLower(s)
+}
+func (f *FS) makeNode(parent *node, name string, mode uint32) *node {
+	f.nextInode++
+	now := fuse.NewTimespec(time.Now())
+	n := &node{name: name, parent: parent, linked: true, stat: fuse.Stat_t{
+		Ino: f.nextInode, Mode: mode, Nlink: 1, Atim: now, Mtim: now, Ctim: now, Birthtim: now, Blksize: 4096}}
+	if runtime.GOOS != "windows" {
+		n.stat.Uid, n.stat.Gid = uint32(osUID()), uint32(osGID())
+	}
+	if mode&fuse.S_IFMT == fuse.S_IFDIR {
+		n.children = make(map[string]*node)
+		n.stat.Nlink = 2
+	}
+	return n
+}
+func validName(s string) bool {
+	return s != "" && s != "." && s != ".." && len(s) <= 255 &&
+		!strings.ContainsAny(s, "\\:\x00<>\"|?*") && !strings.HasSuffix(s, ".") && !strings.HasSuffix(s, " ")
+}
+func (f *FS) lookup(p string) (*node, int) {
+	if p == "/" {
+		return f.root, 0
+	}
+	if !strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") {
+		return nil, -fuse.EINVAL
+	}
+	n := f.root
+	for _, part := range strings.Split(p[1:], "/") {
+		if !validName(part) {
+			return nil, -fuse.EINVAL
+		}
+		if !n.dir() {
+			return nil, -fuse.ENOTDIR
+		}
+		n = n.children[f.key(part)]
+		if n == nil {
+			return nil, -fuse.ENOENT
+		}
+	}
+	return n, 0
+}
+func (f *FS) parent(p string) (*node, string, int) {
+	if p == "/" {
+		return nil, "", -fuse.EBUSY
+	}
+	name := path.Base(p)
+	if !validName(name) {
+		return nil, "", -fuse.EINVAL
+	}
+	n, c := f.lookup(path.Dir(p))
+	if c != 0 {
+		return nil, "", c
+	}
+	if !n.dir() {
+		return nil, "", -fuse.ENOTDIR
+	}
+	return n, name, 0
+}
+func (f *FS) target(p string, fh uint64) (*node, int) {
+	if fh != 0 && fh != ^uint64(0) {
+		h := f.handles[fh]
+		if h == nil {
+			return nil, -fuse.EBADF
+		}
+		return h.n, 0
+	}
+	return f.lookup(p)
+}
+func (f *FS) touch(n *node) {
+	now := fuse.NewTimespec(time.Now())
+	n.stat.Mtim = now
+	n.stat.Ctim = now
+}
+func (f *FS) attach(parent, n *node) {
+	parent.children[f.key(n.name)] = n
+	if n.dir() {
+		parent.stat.Nlink++
+	}
+	f.touch(parent)
+}
+func (f *FS) detach(n *node) {
+	n.removedPath = n.location()
+	delete(n.parent.children, f.key(n.name))
+	if n.dir() {
+		n.parent.stat.Nlink--
+	}
+	f.touch(n.parent)
+	n.linked = false
+	n.stat.Nlink = 0
+	if n.refs == 0 {
+		f.used -= int64(len(n.data))
+		n.data = nil
+	}
+}
+func (f *FS) resize(n *node, size int64) int {
+	if size < 0 {
+		return -fuse.EINVAL
+	}
+	if size > f.config.MaxFileBytes {
+		return -fuse.EFBIG
+	}
+	delta := size - int64(len(n.data))
+	if delta > f.config.MaxTotalBytes-f.used {
+		return -fuse.ENOSPC
+	}
+	if delta > 0 {
+		n.data = append(n.data, make([]byte, int(delta))...)
+	} else if delta < 0 {
+		// Release backing storage too, so shrinking cannot hide old allocations.
+		n.data = append([]byte(nil), n.data[:int(size)]...)
+	}
+	f.used += delta
+	n.stat.Size = size
+	n.stat.Blocks = (size + 511) / 512
+	return 0
+}
+func (f *FS) enqueue(n *pb.Notice) {
+	f.out = append(f.out, n)
+	select {
+	case f.wake <- struct{}{}:
+	default:
+	}
+}
+func (f *FS) commit(n *node, e *pb.Event) {
+	f.revision++
+	e.Revision = f.revision
+	e.Inode = n.stat.Ino
+	e.TimeNs = time.Now().UnixNano()
+	f.enqueue(&pb.Notice{Value: &pb.Notice_Event{Event: e}})
+}
+
+// Next is the only consumer. FUSE never waits for Python or the network.
+func (f *FS) Next(ctx context.Context) (*pb.Notice, error) {
+	for {
+		f.mu.Lock()
+		if len(f.out) > 0 {
+			n := f.out[0]
+			f.out[0] = nil
+			f.out = f.out[1:]
+			if len(f.out) == 0 {
+				f.out = nil
+			}
+			f.mu.Unlock()
+			return n, nil
+		}
+		f.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-f.wake:
+		}
+	}
+}
+func (f *FS) Barrier(id uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enqueue(&pb.Notice{Value: &pb.Notice_Barrier{Barrier: &pb.Barrier{Id: id}}})
+}
+func (f *FS) Stopped() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enqueue(&pb.Notice{Value: &pb.Notice_Stopped{Stopped: &pb.Stopped{}}})
+}
+func (f *FS) Init() {
+	f.mu.Lock()
+	f.enqueue(&pb.Notice{Value: &pb.Notice_Ready{Ready: &pb.Ready{}}})
+	f.mu.Unlock()
+	if f.OnInit != nil {
+		f.OnInit()
+	}
+}
+
+// Seed is only used before mounting; it deliberately emits no mutation events.
+func (f *FS) Seed(e *pb.InitialEntry) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if e == nil {
+		return fmt.Errorf("nil initial entry")
+	}
+	if _, c := f.lookup(e.Path); c == 0 {
+		return fmt.Errorf("duplicate seed path: %s", e.Path)
+	}
+	parent, name, c := f.parent(e.Path)
+	if c != 0 {
+		return fmt.Errorf("invalid seed parent: %s (%d)", e.Path, c)
+	}
+	mode := uint32(fuse.S_IFREG | 0644)
+	if e.Directory {
+		mode = fuse.S_IFDIR | 0755
+	}
+	n := f.makeNode(parent, name, mode)
+	if e.Directory && len(e.Data) > 0 {
+		return fmt.Errorf("directory has data")
+	}
+	if !e.Directory {
+		if c = f.resize(n, int64(len(e.Data))); c != 0 {
+			return fmt.Errorf("seed exceeds memory limits: %d", c)
+		}
+		copy(n.data, e.Data)
+	}
+	f.attach(parent, n)
+	return nil
+}
