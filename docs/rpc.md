@@ -122,7 +122,7 @@ Bootstrap 完成 → 建立 Session → 挂载 → Ready → 变更事件/Barrie
 
 收到 `Command.stop`、Session 接收流 EOF/错误、未知命令、发送失败导致上下文取消，或 `os.Interrupt` / `SIGTERM` 时，Go 请求卸载。若此时挂载尚未初始化，卸载协程会等待初始化或挂载调用结束。`host.Mount` 返回且文件系统回调静止后，Go 将 Stopped 放到已提交事件之后，再等待通知排空。连接断开时无法保证 Stopped 或最后几个事件交付。协议没有重连、重放、持久化、恢复点或跨崩溃恰好一次交付机制。Barrier 回显只表示队列顺序，不是持久化确认。
 
-proto 没有自定义错误消息。服务端可通过标准 gRPC status 拒绝请求，例如鉴权失败用 `UNAUTHENTICATED`、重复 Bootstrap 或 Session 顺序错误用 `FAILED_PRECONDITION`；这些策略由控制服务实现，当前生成基类默认是 `UNIMPLEMENTED`。Go 自身的配置/条目/挂载错误写 stderr 并返回进程退出码 1，不会凭空变成服务端 gRPC 错误响应。
+proto 没有自定义错误消息。服务端可通过标准 gRPC status 拒绝请求，例如鉴权失败用 `UNAUTHENTICATED`、重复 Bootstrap 或 Session 顺序错误用 `FAILED_PRECONDITION`；Go 自身的配置/条目/挂载错误写 stderr 并返回进程退出码 1，不会凭空变成服务端 gRPC 错误响应。
 
 服务端应限制单会话的 Bootstrap/Session 消费次数，检查初始化顺序、token 和消息大小，并拒绝无效 oneof/未知事件。Go 当前只调用一次 Bootstrap 和一次 Session，没有自动重试。proto3 标量未赋值会使用默认值（false/0/空串/空 bytes），业务约束仍需显式检查；oneof 分支可通过 `WhichOneof`（Python）或生成的包装类型（Go）识别。
 
