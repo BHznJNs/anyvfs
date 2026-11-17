@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -13,10 +12,6 @@ import (
 
 	"vfspy/native/internal/memfs"
 	pb "vfspy/native/internal/rpc"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 )
 
 func run() error {
@@ -27,55 +22,27 @@ func run() error {
 
 	slog.SetDefault(slog.Default().With("mountpoint", input.mountpoint))
 	slog.Info("bridge starting")
-	conn, err := grpc.NewClient(input.endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithNoProxy(), grpc.WithDisableRetry(), grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(input.maxMessageBytes), grpc.MaxCallSendMsgSize(input.maxMessageBytes)))
+	client, err := newControllerClient(input)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	client := pb.NewControllerClient(conn)
-	ctx, cancel := context.WithCancel(metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+input.token))
+	defer client.Close()
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	startup, cancelStartup := context.WithTimeout(ctx, input.startupTimeout)
-	bootstrap, err := client.Bootstrap(startup, &pb.Empty{})
+	config, entries, err := client.Startup(ctx)
 	if err != nil {
-		cancelStartup()
 		return err
 	}
-	first, err := bootstrap.Recv()
+	fs, err := memfs.New(config, entries)
 	if err != nil {
-		cancelStartup()
 		return err
 	}
-	fs, err := memfs.New(first.GetConfig())
-	if err != nil {
-		cancelStartup()
-		return err
-	}
-	entries := 0
-	for {
-		item, e := bootstrap.Recv()
-		if e == io.EOF {
-			break
-		}
-		if e != nil {
-			cancelStartup()
-			return e
-		}
-		if e = fs.AddInitialEntry(item.GetEntry()); e != nil {
-			cancelStartup()
-			return e
-		}
-		entries++
-	}
-	cancelStartup()
-	slog.Debug("initial data imported", "entries", entries)
+	slog.Debug("initial data imported", "entries", len(entries))
 	stream, err := client.Session(ctx)
 	if err != nil {
 		return err
 	}
-	host := newFuseHost(fs, first.GetConfig().CaseSensitive)
+	host := newFuseHost(fs, config.CaseSensitive)
 	initialized := make(chan struct{})
 	mountDone := make(chan struct{})
 	fs.OnInit = func() {

@@ -12,7 +12,7 @@ import (
 
 func newFS(t *testing.T, sensitive bool, file, total int64) *FS {
 	t.Helper()
-	f, err := New(&pb.Config{CaseSensitive: sensitive, MaxFileBytes: file, MaxTotalBytes: total})
+	f, err := New(&pb.Config{CaseSensitive: sensitive, MaxFileBytes: file, MaxTotalBytes: total}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

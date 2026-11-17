@@ -59,13 +59,18 @@ type FS struct {
 	OnInit                          func()
 }
 
-func New(config *pb.Config) (*FS, error) {
+func New(config *pb.Config, entries []*pb.InitialEntry) (*FS, error) {
 	if config == nil || config.MaxFileBytes <= 0 || config.MaxTotalBytes <= 0 ||
 		config.MaxFileBytes > config.MaxTotalBytes || config.MaxFileBytes > 1<<30 || config.MaxTotalBytes > 1<<40 {
 		return nil, fmt.Errorf("invalid memory limits (require 0 < file <= total, file <= 1 GiB, total <= 1 TiB)")
 	}
 	f := &FS{config: config, handles: make(map[uint64]*handle), wake: make(chan struct{}, 1)}
 	f.root = f.makeNode(nil, "", fuse.S_IFDIR|0755)
+	for _, entry := range entries {
+		if err := f.AddInitialEntry(entry); err != nil {
+			return nil, err
+		}
+	}
 	return f, nil
 }
 func (f *FS) key(s string) string {
