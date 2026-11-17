@@ -8,14 +8,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 	"time"
 
 	"vfspy/native/internal/memfs"
 	pb "vfspy/native/internal/rpc"
 
-	"github.com/winfsp/cgofuse/fuse"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -77,10 +75,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	host := fuse.NewFileSystemHost(fs)
-	host.SetCapCaseInsensitive(!first.GetConfig().CaseSensitive)
-	host.SetCapReaddirPlus(true)
-	host.SetCapOpenTrunc(true)
+	host := newFuseHost(fs, first.GetConfig().CaseSensitive)
 	initialized := make(chan struct{})
 	mountDone := make(chan struct{})
 	fs.OnInit = func() {
@@ -151,11 +146,7 @@ func run() error {
 		case <-mountDone:
 		}
 	}()
-	options := []string{"-f", "-o", "volname=vfspy", "-o", "attr_timeout=0", "-o", "entry_timeout=0", "-o", "negative_timeout=0"}
-	if runtime.GOOS == "windows" {
-		options = append(options, "-o", "uid=-1,gid=-1")
-	}
-	mounted := host.Mount(input.mountpoint, options)
+	mounted := host.Mount(input.mountpoint)
 	close(mountDone)
 	// Host.Mount returns only after the callbacks are quiescent. Stopped follows
 	// every committed event, allowing Python to drain callbacks on clean close.
