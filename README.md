@@ -6,4 +6,5 @@ vfspy 是一个基于 [cgofuse](https://github.com/winfsp/cgofuse) 实现的可�
 
 - [开发文档](docs/development.md)
 - [RPC 协议](docs/rpc.md)
-- [go 桥接库文档](native/README.md)
+- [Go 进程管理器](docs/process.md)
+- [Go 桥接库文档](native/README.md)

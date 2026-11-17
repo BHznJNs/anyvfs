@@ -5,7 +5,7 @@ import inspect
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 from .._rpc import session_pb2 as pb
-from .errors import SessionError, ProtocolError
+from .errors import ProtocolError, SessionError
 
 EventHandler = Callable[[pb.Event], Awaitable[None] | None]
 

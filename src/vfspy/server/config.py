@@ -1,17 +1,15 @@
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import Field, StrictBool
+
+from ..utils.model import FrozenModel
 
 
-class _FrozenModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, validate_default=True)
-
-
-class InitialEntry(_FrozenModel):
+class InitialEntry(FrozenModel):
     path: str = Field(strict=True, min_length=2, pattern=r"^/")
     directory: StrictBool = False
     data: bytes = Field(default=b"", strict=True, max_length=1 << 30)
 
 
-class RpcServerConfig(_FrozenModel):
+class RpcServerConfig(FrozenModel):
     case_sensitive: StrictBool = True
     max_file_bytes: int = Field(strict=True, gt=0, le=1 << 30)
     max_total_bytes: int = Field(strict=True, gt=0, le=1 << 40)
