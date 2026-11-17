@@ -3,50 +3,43 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
 	"time"
 
+	"vfspy/native/internal/memfs"
+	pb "vfspy/native/internal/rpc"
+
 	"github.com/winfsp/cgofuse/fuse"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
-	"vfspy/native/internal/memfs"
-	pb "vfspy/native/internal/rpc"
 )
 
 func run() error {
-	endpoint := flag.String("endpoint", "", "Python controller loopback address")
-	mountpoint := flag.String("mountpoint", "", "mount path or unused Windows drive")
-	maxMessage := flag.Int("max-message-bytes", 16<<20, "gRPC message size")
-	timeout := flag.Duration("startup-timeout", 25*time.Second, "bootstrap deadline")
-	flag.Parse()
-	slog.SetDefault(slog.Default().With("mountpoint", *mountpoint))
-	token := os.Getenv("VFSPY_TOKEN")
-	os.Unsetenv("VFSPY_TOKEN")
-	hostIP, _, err := net.SplitHostPort(*endpoint)
-	if err != nil || hostIP != "127.0.0.1" || token == "" || *mountpoint == "" || *timeout <= 0 {
-		return fmt.Errorf("loopback endpoint, token, mountpoint and positive startup timeout required")
+	input, err := parseInput()
+	if err != nil {
+		return err
 	}
+
+	slog.SetDefault(slog.Default().With("mountpoint", input.mountpoint))
 	slog.Info("bridge starting")
-	conn, err := grpc.NewClient(*endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()),
+	conn, err := grpc.NewClient(input.endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithNoProxy(), grpc.WithDisableRetry(), grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(*maxMessage), grpc.MaxCallSendMsgSize(*maxMessage)))
+			grpc.MaxCallRecvMsgSize(input.maxMessageBytes), grpc.MaxCallSendMsgSize(input.maxMessageBytes)))
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 	client := pb.NewControllerClient(conn)
-	ctx, cancel := context.WithCancel(metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+token))
+	ctx, cancel := context.WithCancel(metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+input.token))
 	defer cancel()
-	startup, cancelStartup := context.WithTimeout(ctx, *timeout)
+	startup, cancelStartup := context.WithTimeout(ctx, input.startupTimeout)
 	bootstrap, err := client.Bootstrap(startup, &pb.Empty{})
 	if err != nil {
 		cancelStartup()
@@ -162,7 +155,7 @@ func run() error {
 	if runtime.GOOS == "windows" {
 		options = append(options, "-o", "uid=-1,gid=-1")
 	}
-	mounted := host.Mount(*mountpoint, options)
+	mounted := host.Mount(input.mountpoint, options)
 	close(mountDone)
 	// Host.Mount returns only after the callbacks are quiescent. Stopped follows
 	// every committed event, allowing Python to drain callbacks on clean close.
@@ -183,10 +176,13 @@ func run() error {
 	slog.Info("bridge stopped")
 	return nil
 }
+
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+	handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
-	})).With("pid", os.Getpid()))
+	})
+	slog.SetDefault(slog.New(handler).With("pid", os.Getpid()))
+
 	if err := run(); err != nil {
 		slog.Error("bridge failed", "error", err)
 		os.Exit(1)
