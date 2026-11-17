@@ -5,18 +5,21 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/winfsp/cgofuse/fuse"
+	"vfspy/native/internal/queue"
 	pb "vfspy/native/internal/rpc"
 )
 
-func newFS(t *testing.T, sensitive bool, file, total int64) *FS {
+func newFS(t *testing.T, sensitive bool, file, total int64) (*FS, *queue.Queue[*pb.Notice]) {
 	t.Helper()
-	f, err := New(&pb.Config{CaseSensitive: sensitive, MaxFileBytes: file, MaxTotalBytes: total}, nil)
+	notices := queue.New[*pb.Notice]()
+	f, err := New(&pb.Config{CaseSensitive: sensitive, MaxFileBytes: file, MaxTotalBytes: total}, nil, notices)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return f
+	return f, notices
 }
 func addInitialEntry(t *testing.T, f *FS, p string, data []byte, dir bool) {
 	t.Helper()
@@ -40,8 +43,26 @@ func read(t *testing.T, f *FS, h uint64) []byte {
 	return buf[:n]
 }
 
+func drainNotices(t *testing.T, out *queue.Queue[*pb.Notice]) []*pb.Notice {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out.Push(&pb.Notice{Value: &pb.Notice_Barrier{Barrier: &pb.Barrier{Id: 0}}})
+	var notices []*pb.Notice
+	for {
+		n, err := out.Pop(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n.GetBarrier() != nil {
+			return notices
+		}
+		notices = append(notices, n)
+	}
+}
+
 func TestHandlesSurviveRenameReplacementAndUnlink(t *testing.T) {
-	f := newFS(t, true, 1024, 2048)
+	f, out := newFS(t, true, 1024, 2048)
 	addInitialEntry(t, f, "/a", []byte("original"), false)
 	addInitialEntry(t, f, "/b", []byte("target"), false)
 	c, a := f.Open("/a", fuse.O_RDWR)
@@ -54,7 +75,8 @@ func TestHandlesSurviveRenameReplacementAndUnlink(t *testing.T) {
 	}
 	mustCode(t, f.Unlink("/b"), 0)
 	mustCode(t, f.Write("/b", []byte("!"), 8, a), 1)
-	event := f.out[len(f.out)-1].GetEvent().GetFileWritten()
+	notices := drainNotices(t, out)
+	event := notices[len(notices)-1].GetEvent().GetFileWritten()
 	if event.Linked || event.Path != "/b" {
 		t.Fatal("unlinked write must identify old inode and path")
 	}
@@ -68,7 +90,7 @@ func TestHandlesSurviveRenameReplacementAndUnlink(t *testing.T) {
 	}
 }
 func TestSparseTruncateAppendAndEventCopy(t *testing.T) {
-	f := newFS(t, true, 64, 64)
+	f, out := newFS(t, true, 64, 64)
 	c, h := f.Create("/a", fuse.O_RDWR, 0644)
 	mustCode(t, c, 0)
 	buf := []byte("ab")
@@ -77,7 +99,8 @@ func TestSparseTruncateAppendAndEventCopy(t *testing.T) {
 	if !bytes.Equal(read(t, f, h), []byte{0, 0, 0, 'a', 'b'}) {
 		t.Fatal("sparse gap is not zero-filled")
 	}
-	if string(f.out[1].GetEvent().GetFileWritten().Data) != "ab" {
+	notices := drainNotices(t, out)
+	if string(notices[1].GetEvent().GetFileWritten().Data) != "ab" {
 		t.Fatal("event aliases caller buffer")
 	}
 	mustCode(t, f.Truncate("", 2, h), 0)
@@ -88,13 +111,14 @@ func TestSparseTruncateAppendAndEventCopy(t *testing.T) {
 	c, a := f.Open("/a", fuse.O_WRONLY|fuse.O_APPEND)
 	mustCode(t, c, 0)
 	mustCode(t, f.Write("", []byte("z"), 0, a), 1)
-	if f.out[len(f.out)-1].GetEvent().GetFileWritten().Offset != 5 {
+	notices = drainNotices(t, out)
+	if notices[len(notices)-1].GetEvent().GetFileWritten().Offset != 5 {
 		t.Fatal("wrong append offset")
 	}
 	mustCode(t, f.Read("", make([]byte, 1), 0, a), -fuse.EBADF)
 }
 func TestQuotasCountUnlinkedOpenFilesAndFailedOperations(t *testing.T) {
-	f := newFS(t, true, 8, 10)
+	f, _ := newFS(t, true, 8, 10)
 	addInitialEntry(t, f, "/a", []byte("12345678"), false)
 	c, a := f.Open("/a", fuse.O_RDWR)
 	mustCode(t, c, 0)
@@ -113,7 +137,7 @@ func TestQuotasCountUnlinkedOpenFilesAndFailedOperations(t *testing.T) {
 	mustCode(t, f.Write("", []byte("123"), 0, b), 3)
 }
 func TestDirectoryRenameAndEnumerationSnapshot(t *testing.T) {
-	f := newFS(t, false, 64, 128)
+	f, out := newFS(t, false, 64, 128)
 	addInitialEntry(t, f, "/Dir", nil, true)
 	addInitialEntry(t, f, "/Dir/a", []byte("a"), false)
 	c, h := f.Open("/dir/A", fuse.O_RDWR)
@@ -123,7 +147,8 @@ func TestDirectoryRenameAndEnumerationSnapshot(t *testing.T) {
 	mustCode(t, f.Rename("/Dir", "/dir"), 0)
 	mustCode(t, f.Rename("/dir", "/New"), 0)
 	mustCode(t, f.Write("", []byte("b"), 0, h), 1)
-	if f.out[len(f.out)-1].GetEvent().GetFileWritten().Path != "/New/a" {
+	notices := drainNotices(t, out)
+	if notices[len(notices)-1].GetEvent().GetFileWritten().Path != "/New/a" {
 		t.Fatal("subtree path not updated")
 	}
 	mustCode(t, f.Rename("/New", "/New/child"), -fuse.EINVAL)
@@ -136,7 +161,7 @@ func TestDirectoryRenameAndEnumerationSnapshot(t *testing.T) {
 	}
 }
 func TestConcurrentAppendAndBarrierOrdering(t *testing.T) {
-	f := newFS(t, true, 1024, 1024)
+	f, out := newFS(t, true, 1024, 1024)
 	c, h := f.Create("/a", fuse.O_WRONLY|fuse.O_APPEND, 0644)
 	mustCode(t, c, 0)
 	var wg sync.WaitGroup
@@ -152,7 +177,7 @@ func TestConcurrentAppendAndBarrierOrdering(t *testing.T) {
 	wg.Wait()
 	f.Barrier(42)
 	for i := uint64(1); i <= 101; i++ {
-		n, err := f.Next(context.Background())
+		n, err := out.Pop(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -163,13 +188,16 @@ func TestConcurrentAppendAndBarrierOrdering(t *testing.T) {
 			t.Fatal("append was not atomic")
 		}
 	}
-	n, _ := f.Next(context.Background())
+	n, err := out.Pop(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if n.GetBarrier().Id != 42 {
 		t.Fatal("barrier overtook commits")
 	}
 }
 func TestMetadataAndNoOpEvents(t *testing.T) {
-	f := newFS(t, true, 64, 64)
+	f, out := newFS(t, true, 64, 64)
 	addInitialEntry(t, f, "/a", []byte("a"), false)
 	c, h := f.Open("/a", fuse.O_RDONLY)
 	mustCode(t, c, 0)
@@ -183,8 +211,9 @@ func TestMetadataAndNoOpEvents(t *testing.T) {
 	mustCode(t, f.Chmod("/a", 0600), 0)
 	mustCode(t, f.Chown("/a", 123, 456), 0)
 	mustCode(t, f.Utimens("/a", []fuse.Timespec{{Sec: 123, Nsec: 4}, {Sec: 567, Nsec: 8}}), 0)
-	if f.out[0].GetEvent().GetModeChanged() == nil || f.out[1].GetEvent().GetOwnerChanged() == nil ||
-		f.out[2].GetEvent().GetTimesChanged().MtimeNs != 567000000008 {
+	notices := drainNotices(t, out)
+	if notices[0].GetEvent().GetModeChanged() == nil || notices[1].GetEvent().GetOwnerChanged() == nil ||
+		notices[2].GetEvent().GetTimesChanged().MtimeNs != 567000000008 {
 		t.Fatal("wrong metadata event")
 	}
 }

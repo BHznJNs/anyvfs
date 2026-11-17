@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"vfspy/native/internal/memfs"
+	"vfspy/native/internal/queue"
+	pb "vfspy/native/internal/rpc"
 )
 
 // Run starts the filesystem bridge and waits for shutdown.
@@ -33,7 +35,9 @@ func Run() error {
 	if err != nil {
 		return err
 	}
-	fs, err := memfs.New(config, entries)
+	// The filesystem and host produce notices; the sender is the only consumer.
+	notices := queue.New[*pb.Notice]()
+	fs, err := memfs.New(config, entries, notices)
 	if err != nil {
 		return err
 	}
@@ -42,7 +46,7 @@ func Run() error {
 	if err != nil {
 		return err
 	}
-	host := newFuseHost(fs, config.CaseSensitive)
+	host := newFuseHost(fs, config.CaseSensitive, notices)
 	initialized := make(chan struct{})
 	mountDone := make(chan struct{})
 	fs.OnInit = func() {
@@ -58,7 +62,7 @@ func Run() error {
 	}()
 	senderDone := make(chan error, 1)
 	go func() {
-		senderDone <- sendNotices(ctx, stream, fs, cancel)
+		senderDone <- sendNotices(ctx, stream, notices, cancel)
 	}()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
@@ -82,9 +86,6 @@ func Run() error {
 	}()
 	mounted := host.Mount(input.mountpoint)
 	close(mountDone)
-	// Host.Mount returns only after the callbacks are quiescent. Stopped follows
-	// every committed event, allowing Python to drain callbacks on clean close.
-	fs.Stopped()
 	select {
 	case e := <-senderDone:
 		if e != nil && mounted {

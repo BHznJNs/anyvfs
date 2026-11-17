@@ -2,7 +2,6 @@
 package memfs
 
 import (
-	"context"
 	"fmt"
 	"path"
 	"runtime"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/winfsp/cgofuse/fuse"
+	"vfspy/native/internal/queue"
 	pb "vfspy/native/internal/rpc"
 )
 
@@ -54,17 +54,19 @@ type FS struct {
 	nextInode, nextHandle, revision uint64
 	used                            int64
 	config                          *pb.Config
-	out                             []*pb.Notice
-	wake                            chan struct{}
+	notices                         *queue.Queue[*pb.Notice]
 	OnInit                          func()
 }
 
-func New(config *pb.Config, entries []*pb.InitialEntry) (*FS, error) {
+func New(config *pb.Config, entries []*pb.InitialEntry, notices *queue.Queue[*pb.Notice]) (*FS, error) {
 	if config == nil || config.MaxFileBytes <= 0 || config.MaxTotalBytes <= 0 ||
 		config.MaxFileBytes > config.MaxTotalBytes || config.MaxFileBytes > 1<<30 || config.MaxTotalBytes > 1<<40 {
 		return nil, fmt.Errorf("invalid memory limits (require 0 < file <= total, file <= 1 GiB, total <= 1 TiB)")
 	}
-	f := &FS{config: config, handles: make(map[uint64]*handle), wake: make(chan struct{}, 1)}
+	if notices == nil {
+		return nil, fmt.Errorf("nil notice queue")
+	}
+	f := &FS{config: config, handles: make(map[uint64]*handle), notices: notices}
 	f.root = f.makeNode(nil, "", fuse.S_IFDIR|0755)
 	for _, entry := range entries {
 		if err := f.AddInitialEntry(entry); err != nil {
@@ -194,56 +196,23 @@ func (f *FS) resize(n *node, size int64) int {
 	n.stat.Blocks = (size + 511) / 512
 	return 0
 }
-func (f *FS) enqueue(n *pb.Notice) {
-	f.out = append(f.out, n)
-	select {
-	case f.wake <- struct{}{}:
-	default:
-	}
-}
 func (f *FS) commit(n *node, e *pb.Event) {
 	f.revision++
 	e.Revision = f.revision
 	e.Inode = n.stat.Ino
 	e.TimeNs = time.Now().UnixNano()
-	f.enqueue(&pb.Notice{Value: &pb.Notice_Event{Event: e}})
+	f.notices.Push(&pb.Notice{Value: &pb.Notice_Event{Event: e}})
 }
 
-// Next is the only consumer. FUSE never waits for Python or the network.
-func (f *FS) Next(ctx context.Context) (*pb.Notice, error) {
-	for {
-		f.mu.Lock()
-		if len(f.out) > 0 {
-			n := f.out[0]
-			f.out[0] = nil
-			f.out = f.out[1:]
-			if len(f.out) == 0 {
-				f.out = nil
-			}
-			f.mu.Unlock()
-			return n, nil
-		}
-		f.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-f.wake:
-		}
-	}
-}
+// Barrier shares the mutation lock so its notice follows all earlier commits.
 func (f *FS) Barrier(id uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.enqueue(&pb.Notice{Value: &pb.Notice_Barrier{Barrier: &pb.Barrier{Id: id}}})
-}
-func (f *FS) Stopped() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.enqueue(&pb.Notice{Value: &pb.Notice_Stopped{Stopped: &pb.Stopped{}}})
+	f.notices.Push(&pb.Notice{Value: &pb.Notice_Barrier{Barrier: &pb.Barrier{Id: id}}})
 }
 func (f *FS) Init() {
 	f.mu.Lock()
-	f.enqueue(&pb.Notice{Value: &pb.Notice_Ready{Ready: &pb.Ready{}}})
+	f.notices.Push(&pb.Notice{Value: &pb.Notice_Ready{Ready: &pb.Ready{}}})
 	f.mu.Unlock()
 	if f.OnInit != nil {
 		f.OnInit()

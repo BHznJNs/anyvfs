@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"vfspy/native/internal/memfs"
+	"vfspy/native/internal/queue"
 	pb "vfspy/native/internal/rpc"
 )
 
@@ -30,9 +31,9 @@ func receiveCommands(ctx context.Context, stream pb.Controller_SessionClient, fs
 	}
 }
 
-func sendNotices(ctx context.Context, stream pb.Controller_SessionClient, fs *memfs.FS, cancel context.CancelFunc) error {
+func sendNotices(ctx context.Context, stream pb.Controller_SessionClient, notices *queue.Queue[*pb.Notice], cancel context.CancelFunc) error {
 	for {
-		notice, err := fs.Next(ctx)
+		notice, err := notices.Pop(ctx)
 		if err != nil {
 			return err
 		}
