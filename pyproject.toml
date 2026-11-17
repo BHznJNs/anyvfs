@@ -6,6 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["grpcio>=1.78,<2", "protobuf>=6.31.1,<7", "pydantic>=2.10,<3"]
 
+[project.entry-points.pyinstaller40]
+hook-dirs = "vfspy.__pyinstaller:get_hook_dirs"
+
 [dependency-groups]
 dev = ["grpcio-tools==1.78.0", "ruff>=0.11,<1"]
 

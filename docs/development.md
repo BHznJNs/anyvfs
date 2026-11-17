@@ -54,3 +54,16 @@ bridge = files("vfspy").joinpath("_bin", "vfspy-native.exe" if os.name == "nt" e
 ```
 
 wheel 使用 `py3-none-<platform>` 标签，支持 Python 3.11+，不绑定特定 CPython ABI。安装 wheel 不需要 Go 工具链，实际挂载仍需 WinFsp/FUSE 运行时。
+
+### PyInstaller 打包
+
+vfspy 通过 `pyinstaller40` entry point 注册随包发布的 hook。下游项目在打包环境中安装 vfspy wheel 后，只要代码导入 `vfspy` 或其子模块，PyInstaller 就会自动将 native bridge 作为二进制收录到 `vfspy/_bin/`，无需额外指定 `--additional-hooks-dir` 或 `--add-binary`：
+
+```console
+python -m pip install /path/to/vfspy-0.1.0-py3-none-win_amd64.whl pyinstaller
+python -m PyInstaller --onefile app.py
+```
+
+`--onedir` 同样适用，`BridgeProcessConfig.executable` 保持默认值即可通过包资源找到 bridge。打包时需安装与目标平台匹配的 wheel；目标机器实际挂载仍需 WinFsp/FUSE 运行时。
+
+editable 安装不包含 `vfspy/_bin/` 中的 bridge，因此 hook 不会收录开发目录 `bin/` 下的独立构建产物。验证下游打包时应先构建并安装 wheel。
