@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 import signal
 import subprocess
@@ -11,7 +10,7 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-from vfspy.process import BridgeProcess, BridgeProcessConfig, BridgeProcessError
+from vfspy.process import BridgeProcess, BridgeProcessConfig
 
 
 class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
@@ -19,6 +18,7 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
         self.code = "pass"
         self.calls = []
         self.processes = []
+        self.children = []
         self.spawn_entered = asyncio.Event()
         self.spawn_release = asyncio.Event()
         self.spawn_release.set()
@@ -26,9 +26,10 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
 
         async def spawn(*args, **kwargs):
             self.calls.append((args, kwargs))
-            process = await real_spawn(sys.executable, "-c", self.code, *args[1:], **kwargs)
             self.spawn_entered.set()
             await self.spawn_release.wait()
+            process = await real_spawn(sys.executable, "-c", self.code, *args[1:], **kwargs)
+            self.children.append(process)
             return process
 
         self.spawn_patch = patch(
@@ -51,25 +52,12 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
         self.processes.append(process)
         return process
 
-    async def wait_stderr(self, process, marker):
-        async with asyncio.timeout(5):
-            while marker not in process.stderr:
-                await asyncio.sleep(0.01)
-
-    async def test_arguments_environment_and_normal_exit(self):
-        self.code = (
-            "import json,os,sys; "
-            "sys.stderr.write(json.dumps([sys.argv[1:], os.environ['VFSPY_TOKEN']]))"
-        )
+    async def test_arguments_and_environment(self):
         mountpoint = "mount dir & $(literal)"
         process = self.process(mountpoint=mountpoint, max_message_bytes=2048, startup_timeout=0.125)
-        self.assertIsNone(process.pid)
-        self.assertIsNone(process.returncode)
-        self.assertFalse(process.running)
         with patch.dict(os.environ, {"VFSPY_TOKEN": "parent-secret"}):
             self.assertIs(await process.start(), process)
             self.assertEqual(os.environ["VFSPY_TOKEN"], "parent-secret")
-            self.assertEqual(await process.wait(timeout=5), 0)
         expected = [
             "--endpoint",
             "127.0.0.1:12345",
@@ -80,64 +68,30 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
             "--startup-timeout",
             "125ms",
         ]
-        arguments, token = json.loads(process.stderr)
-        self.assertEqual(arguments, expected)
-        self.assertEqual(token, "child-secret")
         argv, kwargs = self.calls[0]
         self.assertEqual(argv, (str(Path(sys.executable).resolve()), *expected))
+        self.assertEqual(kwargs["env"]["VFSPY_TOKEN"], "child-secret")
         self.assertNotIn("child-secret", argv)
         self.assertNotIn("shell", kwargs)
         self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
         self.assertEqual(kwargs["stdout"], subprocess.DEVNULL)
+        self.assertIsNone(kwargs.get("stderr"))
         self.assertEqual(
             kwargs["creationflags"], subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         )
-        self.assertIsNotNone(process.pid)
-        self.assertEqual(process.returncode, 0)
-        self.assertFalse(process.running)
-        self.assertEqual(await process.wait(), 0)
         with self.assertRaises(RuntimeError):
             await process.start()
 
-    async def test_failure_includes_diagnostics_and_can_be_unchecked(self):
-        self.code = "import sys; sys.stderr.buffer.write(b'mount failed\\n'); sys.exit(7)"
+    async def test_close_after_child_exits(self):
+        self.code = "raise SystemExit(7)"
         process = await self.process().start()
-        with self.assertRaises(BridgeProcessError) as raised:
-            await process.wait(timeout=5)
-        self.assertEqual(raised.exception.returncode, 7)
-        self.assertEqual(raised.exception.stderr, "mount failed\n")
-        self.assertIn("mount failed", str(raised.exception))
-        self.assertEqual(await process.wait(check=False), 7)
-        await process.close()
-
-    async def test_output_is_drained_and_diagnostic_memory_is_bounded(self):
-        self.code = (
-            "import sys; sys.stdout.buffer.write(b'x' * (2 << 20)); "
-            "sys.stderr.buffer.write(b'x' * (2 << 20) + b'\\xffend')"
-        )
-        process = await self.process().start()
-        self.assertEqual(await process.wait(timeout=5), 0)
-        self.assertEqual(len(process._stderr), 64 << 10)
-        self.assertTrue(process.stderr.endswith("\ufffdend"))
-
-    async def test_timeout_and_cancelled_wait_do_not_cancel_shared_exit_monitor(self):
-        self.code = "import time; time.sleep(60)"
-        process = await self.process().start()
-        with self.assertRaises(TimeoutError):
-            await process.wait(timeout=0.01)
-        waiter = asyncio.create_task(process.wait())
-        await asyncio.sleep(0)
-        waiter.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await waiter
-        self.assertTrue(process.running)
-        first = asyncio.create_task(process.wait(check=False))
-        second = asyncio.create_task(process.wait(check=False))
-        code = await process.kill()
-        self.assertEqual(await first, code)
-        self.assertEqual(await second, code)
-        self.assertIsNotNone(code)
-        self.assertFalse(process.running)
+        child = self.children[0]
+        self.assertEqual(await asyncio.wait_for(child.wait(), 5), 7)
+        with patch.object(child, "terminate") as terminate:
+            await process.close()
+        terminate.assert_not_called()
+        with self.assertRaises(RuntimeError):
+            await process.start()
 
     async def test_context_exit_reaps_process_and_preserves_body_error(self):
         self.code = "import time; time.sleep(60)"
@@ -145,13 +99,12 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "body failure"):
             async with process as value:
                 self.assertIs(value, process)
-                self.assertTrue(value.running)
+                self.assertIsNone(self.children[0].returncode)
                 raise ValueError("body failure")
-        self.assertFalse(process.running)
-        self.assertIsNotNone(process.returncode)
+        self.assertIsNotNone(self.children[0].returncode)
         await asyncio.gather(process.close(), process.close())
 
-    async def test_close_and_start_race_reaps_process(self):
+    async def test_close_during_start_waits_and_reaps_child(self):
         self.code = "import time; time.sleep(60)"
         self.spawn_release.clear()
         process = self.process()
@@ -159,72 +112,76 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
         await self.spawn_entered.wait()
         closing = asyncio.create_task(process.close())
         await asyncio.sleep(0)
+        self.assertFalse(closing.done())
         self.spawn_release.set()
-        with self.assertRaisesRegex(RuntimeError, "closed while starting"):
-            await starting
+        self.assertIs(await starting, process)
         await closing
-        self.assertFalse(process.running)
-        self.assertIsNotNone(process.returncode)
+        self.assertIsNotNone(self.children[0].returncode)
 
-    async def test_cancellation_during_creation_reaps_child(self):
-        self.code = "import time; time.sleep(60)"
+    async def test_cancelled_start_releases_lifecycle_lock(self):
         self.spawn_release.clear()
         process = self.process()
         starting = asyncio.create_task(process.start())
         await self.spawn_entered.wait()
         starting.cancel()
-        await asyncio.sleep(0)
-        self.assertFalse(starting.done())
-        self.spawn_release.set()
         with self.assertRaises(asyncio.CancelledError):
             await starting
-        self.assertFalse(process.running)
-        self.assertIsNotNone(process.returncode)
+        await process.close()
+        self.assertEqual(self.children, [])
 
-    async def test_cancellation_during_close_still_reaps_child(self):
+    async def test_cancelled_close_kills_and_reaps_child(self):
         self.code = "import time; time.sleep(60)"
-        process = await self.process().start()
-        entered, release = asyncio.Event(), asyncio.Event()
-        real_terminate = process.terminate
+        process = await self.process(stop_timeout=5).start()
+        child = self.children[0]
+        entered = asyncio.Event()
+        real_wait = child.wait
 
-        async def delayed_terminate():
-            entered.set()
-            await release.wait()
-            return await real_terminate()
+        async def delayed_wait():
+            if not entered.is_set():
+                entered.set()
+                await asyncio.Future()
+            return await asyncio.wait_for(real_wait(), 5)
 
-        with patch.object(process, "terminate", side_effect=delayed_terminate):
+        with (
+            patch.object(child, "terminate"),
+            patch.object(child, "wait", side_effect=delayed_wait),
+        ):
             closing = asyncio.create_task(process.close())
             await entered.wait()
             closing.cancel()
-            await asyncio.sleep(0)
-            closing.cancel()
-            await asyncio.sleep(0)
-            self.assertFalse(closing.done())
-            release.set()
             with self.assertRaises(asyncio.CancelledError):
                 await closing
-        self.assertFalse(process.running)
-        self.assertIsNotNone(process.returncode)
+        self.assertIsNotNone(child.returncode)
 
     @unittest.skipIf(os.name == "nt", "Windows terminate is already forceful")
-    async def test_terminate_escalates_to_kill_when_sigterm_is_ignored(self):
-        self.code = (
-            "import signal,sys,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-            "sys.stderr.write('ready\\n'); sys.stderr.flush(); time.sleep(60)"
-        )
-        process = await self.process().start()
-        await self.wait_stderr(process, "ready")
-        self.assertEqual(await process.terminate(timeout=0.05), -signal.SIGKILL)
+    async def test_close_escalates_to_kill_when_sigterm_is_ignored(self):
+        with tempfile.TemporaryDirectory() as folder:
+            ready = Path(folder) / "ready"
+            self.code = (
+                "import signal,time; from pathlib import Path; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                f"Path({str(ready)!r}).touch(); time.sleep(60)"
+            )
+            process = await self.process().start()
+            async with asyncio.timeout(5):
+                while not ready.exists():
+                    await asyncio.sleep(0.01)
+            await process.close()
+        self.assertEqual(self.children[0].returncode, -signal.SIGKILL)
 
-    async def test_terminate_escalation_and_concurrent_close(self):
+    async def test_concurrent_close_escalates_once(self):
         self.code = "import time; time.sleep(60)"
         process = await self.process().start()
+        child = self.children[0]
         # Exercise the timeout path on Windows too, where SIGTERM cannot be ignored.
-        with patch.object(process._process, "terminate") as terminate:
+        with (
+            patch.object(child, "terminate") as terminate,
+            patch.object(child, "kill", wraps=child.kill) as kill,
+        ):
             await asyncio.gather(process.close(), process.close())
         terminate.assert_called_once()
-        self.assertFalse(process.running)
-        self.assertIsNotNone(process.returncode)
+        kill.assert_called_once()
+        self.assertIsNotNone(child.returncode)
 
     async def test_bundled_executable_resolution(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -233,25 +190,21 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
             binary = package / "_bin" / name
             binary.parent.mkdir()
             binary.touch()
-            process = self.process(executable=None)
-            with patch("vfspy.process.manager.files", return_value=package):
-                await process.start()
-                self.assertEqual(await process.wait(timeout=5), 0)
+            with patch("vfspy.process._executable.__file__", package / "process/_executable.py"):
+                process = self.process(executable=None)
+            await process.start()
             self.assertEqual(self.calls[0][0][0], str(binary))
 
-    async def test_missing_bundled_binary_is_actionable_and_releases_resources(self):
+    async def test_missing_bundled_binary_is_actionable(self):
         with tempfile.TemporaryDirectory() as folder:
-            process = self.process(executable=None)
-            with patch("vfspy.process.manager.files", return_value=Path(folder)):
+            with patch(
+                "vfspy.process._executable.__file__", Path(folder) / "process/_executable.py"
+            ):
                 with self.assertRaisesRegex(FileNotFoundError, "build_bridge.py"):
-                    await process.start()
-            self.assertIsNone(process.pid)
+                    self.process(executable=None)
             self.assertEqual(self.calls, [])
-            await process.close()
-            with self.assertRaises(RuntimeError):
-                await process.start()
 
-    async def test_spawn_failure_is_propagated_and_close_remains_safe(self):
+    async def test_start_can_be_retried_after_spawn_failure(self):
         process = self.process()
         with patch(
             "vfspy.process.manager.asyncio.create_subprocess_exec",
@@ -260,18 +213,15 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(OSError, "cannot execute"):
                 await process.start()
         await process.close()
-        self.assertIsNone(process.pid)
+        self.assertEqual(self.children, [])
+        self.assertIs(await process.start(), process)
 
-    async def test_operations_before_start_and_close_before_start(self):
+    async def test_close_before_start_allows_start(self):
         process = self.process()
-        for operation in (process.wait, process.terminate, process.kill):
-            with self.assertRaisesRegex(RuntimeError, "has not started"):
-                await operation()
         await process.close()
         await process.close()
-        with self.assertRaises(RuntimeError):
-            await process.start()
         self.assertEqual(self.calls, [])
+        self.assertIs(await process.start(), process)
 
     async def test_concurrent_start_is_rejected(self):
         self.code = "import time; time.sleep(60)"
@@ -279,10 +229,11 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
         process = self.process()
         starting = asyncio.create_task(process.start())
         await self.spawn_entered.wait()
-        with self.assertRaises(RuntimeError):
-            await process.start()
+        duplicate = asyncio.create_task(process.start())
         self.spawn_release.set()
         await starting
+        with self.assertRaises(RuntimeError):
+            await duplicate
         self.assertEqual(len(self.calls), 1)
 
 

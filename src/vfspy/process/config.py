@@ -1,3 +1,5 @@
+import math
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -24,6 +26,25 @@ class BridgeProcessConfig(FrozenModel):
     startup_timeout: PositiveTimeout = Field(
         default=25.0,
         lt=_MAX_GO_DURATION_MILLISECONDS / 1_000,
-        description="Bootstrap deadline in seconds, rounded up to milliseconds within Go's duration range.",
+        description=(
+            "Bootstrap deadline in seconds, rounded up to milliseconds within Go's duration range."
+        ),
     )
     stop_timeout: PositiveTimeout = 5.0
+
+    def to_arguments(self) -> tuple[str, ...]:
+        return (
+            "--endpoint",
+            self.endpoint,
+            "--mountpoint",
+            self.mountpoint,
+            "--max-message-bytes",
+            str(self.max_message_bytes),
+            "--startup-timeout",
+            f"{math.ceil(self.startup_timeout * 1_000)}ms",
+        )
+
+    def to_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        env["VFSPY_TOKEN"] = self.token
+        return env
