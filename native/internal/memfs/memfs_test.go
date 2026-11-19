@@ -3,9 +3,9 @@ package memfs
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/winfsp/cgofuse/fuse"
 	"anyvfs/native/internal/queue"
@@ -45,17 +45,17 @@ func read(t *testing.T, f *FS, h uint64) []byte {
 
 func drainNotices(t *testing.T, out *queue.Queue[*pb.Notice]) []*pb.Notice {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out.Push(&pb.Notice{Value: &pb.Notice_Barrier{Barrier: &pb.Barrier{Id: 0}}})
+	// Pop returns queued notices before checking cancellation.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
 	var notices []*pb.Notice
 	for {
 		n, err := out.Pop(ctx)
+		if errors.Is(err, context.Canceled) {
+			return notices
+		}
 		if err != nil {
 			t.Fatal(err)
-		}
-		if n.GetBarrier() != nil {
-			return notices
 		}
 		notices = append(notices, n)
 	}
@@ -160,7 +160,7 @@ func TestDirectoryRenameAndEnumerationSnapshot(t *testing.T) {
 		t.Fatal("directory offset/snapshot changed")
 	}
 }
-func TestConcurrentAppendAndBarrierOrdering(t *testing.T) {
+func TestConcurrentAppendAndEventOrdering(t *testing.T) {
 	f, out := newFS(t, true, 1024, 1024)
 	c, h := f.Create("/a", fuse.O_WRONLY|fuse.O_APPEND, 0644)
 	mustCode(t, c, 0)
@@ -175,25 +175,18 @@ func TestConcurrentAppendAndBarrierOrdering(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	f.Barrier(42)
-	for i := uint64(1); i <= 101; i++ {
-		n, err := out.Pop(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n.GetEvent().Revision != i {
+	notices := drainNotices(t, out)
+	if len(notices) != 101 {
+		t.Fatalf("got %d notices, want 101", len(notices))
+	}
+	for i, notice := range notices {
+		event := notice.GetEvent()
+		if event.GetRevision() != uint64(i+1) {
 			t.Fatal("revision order violated")
 		}
-		if i > 1 && n.GetEvent().GetFileWritten().Offset != int64(i-2) {
+		if i > 0 && event.GetFileWritten().Offset != int64(i-1) {
 			t.Fatal("append was not atomic")
 		}
-	}
-	n, err := out.Pop(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n.GetBarrier().Id != 42 {
-		t.Fatal("barrier overtook commits")
 	}
 }
 func TestMetadataAndNoOpEvents(t *testing.T) {

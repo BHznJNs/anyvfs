@@ -204,12 +204,6 @@ func (f *FS) commit(n *node, e *pb.Event) {
 	f.notices.Push(&pb.Notice{Value: &pb.Notice_Event{Event: e}})
 }
 
-// Barrier shares the mutation lock so its notice follows all earlier commits.
-func (f *FS) Barrier(id uint64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.notices.Push(&pb.Notice{Value: &pb.Notice_Barrier{Barrier: &pb.Barrier{Id: id}}})
-}
 func (f *FS) Init() {
 	f.mu.Lock()
 	f.notices.Push(&pb.Notice{Value: &pb.Notice_Ready{Ready: &pb.Ready{}}})

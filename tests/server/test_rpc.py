@@ -57,9 +57,8 @@ class RpcServerTests(unittest.IsolatedAsyncioTestCase):
 
     async def finish(self, call):
         await call.write(pb.Notice(stopped=pb.Stopped()))
-        await call.done_writing()
-        self.assertIs(await call.read(), grpc.aio.EOF)
         await self.server.wait_closed(timeout=2)
+        self.assertIs(await call.read(), grpc.aio.EOF)
 
     async def test_bootstrap_order_and_single_use(self):
         items = await self.bootstrap()
@@ -95,7 +94,7 @@ class RpcServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.code(), grpc.StatusCode.FAILED_PRECONDITION)
         await self.finish(call)
 
-    async def test_barrier_waits_for_callback_and_can_send_while_callback_waits(self):
+    async def test_close_sends_stop_once_and_drains_event_callbacks(self):
         entered, release = (asyncio.Event(), asyncio.Event())
 
         async def callback(item):
@@ -107,43 +106,19 @@ class RpcServerTests(unittest.IsolatedAsyncioTestCase):
         call = await self.session()
         await call.write(event())
         await asyncio.wait_for(entered.wait(), 2)
-        barrier = asyncio.create_task(self.server.barrier(timeout=2))
-        command = await call.read()
-        self.assertEqual(command.WhichOneof("value"), "barrier")
-        await call.write(pb.Notice(barrier=command.barrier))
-        self.assertFalse(barrier.done())
-        self.assertEqual(self.server.revision, 0)
-        release.set()
-        self.assertEqual(await barrier, command.barrier.id)
-        self.assertEqual(self.server.revision, 1)
-        self.assertEqual(len(self.events), 1)
-        await self.finish(call)
-
-    async def test_late_barrier_reply_after_timeout_is_valid(self):
-        call = await self.session()
-        barrier = asyncio.create_task(self.server.barrier(timeout=0.05))
-        command = await call.read()
-        with self.assertRaises(TimeoutError):
-            await barrier
-        await call.write(pb.Notice(barrier=command.barrier))
-        second = asyncio.create_task(self.server.barrier(timeout=2))
-        command2 = await call.read()
-        self.assertGreater(command2.barrier.id, command.barrier.id)
-        await call.write(pb.Notice(barrier=command2.barrier))
-        await second
-        await self.finish(call)
-
-    async def test_close_sends_stop_once_and_drains_final_event(self):
-        call = await self.session()
         closing = asyncio.create_task(self.server.close(timeout=2))
         command = await call.read()
         self.assertEqual(command.WhichOneof("value"), "stop")
         self.server.request_stop()
+        await call.write(event(2))
+        await call.write(pb.Notice(stopped=pb.Stopped()))
         self.assertFalse(closing.done())
-        await call.write(event())
-        await self.finish(call)
+        self.assertEqual(self.server.revision, 0)
+        release.set()
         await closing
-        self.assertEqual(self.server.revision, 1)
+        self.assertIs(await call.read(), grpc.aio.EOF)
+        self.assertEqual(self.server.revision, 2)
+        self.assertEqual([item.revision for item in self.events], [1, 2])
         await self.server.close()
 
     async def test_stopped_without_ready_does_not_claim_mount_success(self):
@@ -170,39 +145,13 @@ class RpcServerTests(unittest.IsolatedAsyncioTestCase):
             await call.read()
         self.assertEqual(raised.exception.code(), grpc.StatusCode.INVALID_ARGUMENT)
 
-    async def test_unknown_barrier_rejected(self):
-        call = await self.session()
-        await call.write(pb.Notice(barrier=pb.Barrier(id=123)))
-        with self.assertRaises(grpc.aio.AioRpcError) as raised:
-            await call.read()
-        self.assertEqual(raised.exception.code(), grpc.StatusCode.INVALID_ARGUMENT)
-
-    async def test_notice_after_stopped_rejected(self):
+    async def test_disconnect_after_stopped_leaves_session_successful(self):
         call = await self.session()
         await call.write(pb.Notice(stopped=pb.Stopped()))
-        await call.write(event())
-        with self.assertRaises(grpc.aio.AioRpcError) as raised:
-            await call.read()
-        self.assertEqual(raised.exception.code(), grpc.StatusCode.INVALID_ARGUMENT)
-
-    async def test_stopped_unblocks_wait_ready_before_eof(self):
-        call = await self.session(ready=False)
-        await call.write(pb.Notice(stopped=pb.Stopped()))
-        with self.assertRaisesRegex(SessionError, "before Ready"):
-            await self.server.wait_ready(timeout=2)
-        await call.done_writing()
-        self.assertIs(await call.read(), grpc.aio.EOF)
-
-    async def test_missing_barrier_echo_rejected_at_eof(self):
-        call = await self.session()
-        barrier = asyncio.create_task(self.server.barrier(timeout=2))
-        await call.read()
-        await call.write(pb.Notice(stopped=pb.Stopped()))
-        await call.done_writing()
-        with self.assertRaisesRegex(SessionError, "unacknowledged"):
-            await barrier
-        with self.assertRaises(grpc.aio.AioRpcError):
-            await call.read()
+        await self.server.wait_closed(timeout=2)
+        call.cancel()
+        await self.server.close(timeout=2)
+        self.assertTrue(self.server.stopped)
 
     async def test_invalid_events_rejected(self):
         invalid = [
@@ -234,23 +183,18 @@ class RpcServerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(grpc.aio.AioRpcError):
             await call.read()
 
-    async def test_eof_without_stopped_unblocks_barrier(self):
+    async def test_eof_without_stopped_rejected(self):
         call = await self.session()
-        barrier = asyncio.create_task(self.server.barrier(timeout=2))
-        await call.read()
         await call.done_writing()
-        with self.assertRaises(SessionError):
-            await barrier
-        with self.assertRaises(grpc.aio.AioRpcError):
+        with self.assertRaisesRegex(SessionError, "without Stopped"):
+            await self.server.wait_closed(timeout=2)
+        with self.assertRaises(grpc.aio.AioRpcError) as raised:
             await call.read()
+        self.assertEqual(raised.exception.code(), grpc.StatusCode.INVALID_ARGUMENT)
 
-    async def test_disconnect_unblocks_waiters(self):
+    async def test_disconnect_before_stopped_unblocks_wait_closed_with_error(self):
         call = await self.session()
-        barrier = asyncio.create_task(self.server.barrier(timeout=2))
-        await call.read()
         call.cancel()
-        with self.assertRaises(SessionError):
-            await barrier
         with self.assertRaises(SessionError):
             await self.server.wait_closed(timeout=2)
 

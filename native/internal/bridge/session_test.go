@@ -34,13 +34,13 @@ func TestSendNoticesDrainsQueueThroughStopped(t *testing.T) {
 	want := []*pb.Notice{
 		{Value: &pb.Notice_Ready{Ready: &pb.Ready{}}},
 		{Value: &pb.Notice_Event{Event: &pb.Event{Revision: 1}}},
-		{Value: &pb.Notice_Barrier{Barrier: &pb.Barrier{Id: 42}}},
+		{Value: &pb.Notice_Event{Event: &pb.Event{Revision: 2}}},
 		{Value: &pb.Notice_Stopped{Stopped: &pb.Stopped{}}},
 	}
 	for _, notice := range want {
 		notices.Push(notice)
 	}
-	afterStopped := &pb.Notice{Value: &pb.Notice_Barrier{Barrier: &pb.Barrier{Id: 43}}}
+	afterStopped := &pb.Notice{Value: &pb.Notice_Event{Event: &pb.Event{Revision: 3}}}
 	notices.Push(afterStopped)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

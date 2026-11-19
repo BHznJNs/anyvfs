@@ -1,8 +1,8 @@
 # AnyVFS Go 原生文件系统进程
 
-Go 程序负责内存中的目录树、文件内容、inode、句柄、容量限制与 WinFsp/FUSE 挂载。系统文件读写直接在 Go 中完成，文件变更通过 gRPC 上报给控制进程。
+Go 程序负责内存中的目录树、文件内容、inode、句柄、容量限制与 WinFsp/FUSE 挂载。外部应用通过操作系统访问挂载点，Go 处理这些文件请求，并把已提交的变更通过 gRPC 上报给控制进程。
 
-入口为 [`main.go`](main.go)，Go 模块名为 `anyvfs/native`，`go.mod` 要求 Go 1.23.0。控制通信的接口、鉴权、消息和生命周期统一见 [RPC 文档](../docs/rpc.md)。Python 客户端包仍名为 `vfspy`。
+入口为 [`main.go`](main.go)，Go 模块名为 `anyvfs/native`，`go.mod` 要求 Go 1.23.0。控制通信的接口、鉴权、消息和生命周期见 [RPC 文档](../docs/rpc.md)。
 
 ## 构建
 
@@ -35,7 +35,7 @@ subprocess.run(
 )
 ```
 
-`env` 参数仅向子进程传入 token，不修改当前 Python 进程的环境变量。`subprocess.run` 会等待 Go 进程退出；就绪状态和会话完成的判断方式见 [RPC 文档](../docs/rpc.md)。
+`env` 参数仅向子进程传入 token，不修改当前 Python 进程的环境变量。这段启动代码供独立启动器使用，`subprocess.run` 会阻塞到 Go 退出。如果 Python 进程同时运行控制服务，可用 `asyncio.create_subprocess_exec` 启动 Go，让事件循环持续处理通知。就绪状态和会话完成的判断方式见 [RPC 文档](../docs/rpc.md)。
 
 | 参数 | 默认值 | 输入要求与用途 |
 | --- | --- | --- |

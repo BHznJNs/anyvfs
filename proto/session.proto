@@ -17,11 +17,10 @@ message InitialEntry { string path = 1; bool directory = 2; bytes data = 3; }
 message BootstrapItem { oneof value { Config config = 1; InitialEntry entry = 2; } }
 message Ready {}
 message Stopped {}
-message Barrier { uint64 id = 1; }
 message Stop {}
-message Command { oneof value { Stop stop = 1; Barrier barrier = 2; } }
+message Command { oneof value { Stop stop = 1; } }
 message Notice {
-  oneof value { Ready ready = 1; Event event = 2; Barrier barrier = 3; Stopped stopped = 4; }
+  oneof value { Ready ready = 1; Event event = 2; Stopped stopped = 3; }
 }
 message FileCreated { string path = 1; uint32 mode = 2; }
 message DirectoryCreated { string path = 1; uint32 mode = 2; }

@@ -19,7 +19,7 @@ uv run --no-sync ruff check src scripts tests
 uv run --no-sync ruff format --check src scripts tests
 ```
 
-首次检出需先生成 RPC 绑定。测试命令自动发现并运行 `tests/` 下的全部 Python 测试；当前覆盖 RPC 协议交互、Pydantic 配置校验与不可变性，以及进程启动、退出、取消与终止回收。进程测试使用真实 Python 子进程模拟 bridge，无需构建 Go、实际挂载或安装 WinFsp/FUSE。
+首次检出需先生成 RPC 绑定。测试命令自动发现并运行 `tests/` 下的全部 Python 测试，覆盖 RPC 协议交互、Pydantic 配置校验与不可变性，以及进程启动、退出、取消与终止回收。RPC 测试用 Python 客户端模拟 Go 通知流，进程测试用 Python 子进程模拟 bridge。从外部进程操作真实挂载点到 Python 收到通知的整条链路需要用 WinFsp/FUSE 单独验证。
 
 ## 构建
 

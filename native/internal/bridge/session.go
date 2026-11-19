@@ -4,31 +4,23 @@ import (
 	"context"
 	"log/slog"
 
-	"anyvfs/native/internal/memfs"
 	"anyvfs/native/internal/queue"
 	pb "anyvfs/native/internal/rpc"
 )
 
-func receiveCommands(ctx context.Context, stream pb.Controller_SessionClient, fs *memfs.FS) {
-	for {
-		command, err := stream.Recv()
-		if err != nil {
-			if ctx.Err() == nil {
-				slog.Warn("controller session disconnected", "error", err)
-			}
-			return
+func receiveCommand(ctx context.Context, stream pb.Controller_SessionClient) {
+	command, err := stream.Recv()
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("controller session disconnected", "error", err)
 		}
-		switch v := command.Value.(type) {
-		case *pb.Command_Barrier:
-			fs.Barrier(v.Barrier.Id)
-		case *pb.Command_Stop:
-			slog.Debug("unmount requested")
-			return
-		default:
-			slog.Warn("unknown controller command")
-			return
-		}
+		return
 	}
+	if command.GetStop() != nil {
+		slog.Debug("unmount requested")
+		return
+	}
+	slog.Warn("unknown controller command")
 }
 
 func sendNotices(ctx context.Context, stream pb.Controller_SessionClient, notices *queue.Queue[*pb.Notice], cancel context.CancelFunc) error {

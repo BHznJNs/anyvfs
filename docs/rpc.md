@@ -9,9 +9,9 @@
 | 完整 RPC 路径 | 请求 | 响应 | 流类型 | 用途 |
 | --- | --- | --- | --- | --- |
 | `/anyvfs.Controller/Bootstrap` | `Empty`，Go → 控制进程 | `BootstrapItem`，控制进程 → Go | unary → stream | 一次性下发配置和初始文件树 |
-| `/anyvfs.Controller/Session` | `Notice` 流，Go → 控制进程 | `Command` 流，控制进程 → Go | stream ↔ stream | 挂载状态、变更通知、同步屏障及停止命令 |
+| `/anyvfs.Controller/Session` | `Notice` 流，Go → 控制进程 | `Command` 流，控制进程 → Go | stream ↔ stream | 挂载状态、变更通知及停止命令 |
 
-全部接口只有以上两个 RPC。没有单独的文件读、写、列表、快照、健康检查或日志 RPC；文件访问通过挂载路径进行。
+外部应用通过操作系统的普通文件接口访问挂载路径。Go 挂载进程处理这些请求，把已提交的变更通过 Session 上报给控制进程。访问挂载路径遵循操作系统的访问规则，RPC token 用于 Go 与控制服务之间的鉴权。
 
 连接限定 `127.0.0.1:端口`，无 TLS，Go 禁用代理和自动 RPC 重试。Go 从子进程环境读取非空的 `ANYVFS_TOKEN` 后，立即清除自身环境中的该变量，并在每个 RPC 的 metadata 中附带 `authorization: Bearer <token>`。清除操作不影响父进程环境；Python 启动示例通过 `subprocess.run(..., env=...)` 仅向子进程传入 token。服务端必须校验它；鉴权并未由 proto 或生成的服务基类实现。建议一个 token 对应一次挂载会话，使用不可预测的随机值。
 
@@ -52,31 +52,25 @@ Bootstrap 正常结束后，Go 建立一条长期双向流，再执行挂载。�
 
 ### 通知封装：Go → 控制进程
 
-`Notice` 的下列四个字段属于 `oneof value`，每条只设置一个：
+`Notice` 的下列三个字段属于 `oneof value`，每条只设置一个：
 
 | 字段 | 类型 / 字段号 | 含义 |
 | --- | --- | --- |
 | `ready` | `Ready = 1` | FUSE `Init` 时排入队列，表示挂载初始化到达就绪点。 |
 | `event` | `Event = 2` | 一次已经提交的文件系统变更。 |
-| `barrier` | `Barrier = 3` | 回显控制服务发送的屏障 id，位于此前已经排队的 Notice 之后。 |
 | `stopped` | `Stopped = 4` | 挂载调用返回且回调静止后排入队尾，之后 Go 关闭请求流发送方向。挂载失败时也可能发送它，不能单凭它推断曾经 Ready。 |
 
-`Ready {}`、`Stopped {}` 都是无字段消息。普通成功挂载中 Ready 先于运行时事件，Stopped 后于全部已提交事件。服务端应追踪 Ready、revision、屏障和 Stopped，并检查非法或空的 oneof；生成绑定本身不执行状态校验。
+`Ready {}`、`Stopped {}` 都是无字段消息。普通成功挂载中 Ready 先于运行时事件，Stopped 后于全部已提交事件。服务端应追踪 Ready、revision 和 Stopped，并检查非法或空的 oneof；生成绑定本身不执行状态校验。
 
 ### 命令封装：控制进程 → Go
 
-`Command` 的下列两个字段属于 `oneof value`：
+`Command` 的 `oneof value` 只有 `stop` 字段。
 
 | 字段 | 类型 / 字段号 | 行为 |
 | --- | --- | --- |
-| `stop` | `Stop = 1` | `Stop {}` 无字段；Go 退出接收循环并触发卸载，之后尽力排空通知并发送 Stopped。 |
-| `barrier` | `Barrier = 2` | Go 将同一个 id 的 `Notice.barrier` 排入通知队列。 |
+| `stop` | `Stop = 1` | `Stop {}` 无字段。Go 收到后请求卸载，随后尽力排空通知并发送 Stopped。 |
 
-`Barrier` 只有 `id: uint64 = 1`。服务端选择 id 并关联等待请求，建议使用会话内递增且不重复的值。Go 不验证 id 的唯一性，也不要求从 1 开始。
-
-屏障在 Go 文件系统互斥锁内排队，所以回显之前的消息包括在该时刻以前已经提交的事件。屏障不等待未来写入，不保证操作系统尚未提交的缓冲写入完成，也不自动等待服务端业务回调完成。若需要“回调已处理”，服务端必须让屏障与事件进入同一个有序处理队列后再确认。
-
-当前 Go 对空/未知 `Command.value` 会记录告警并结束接收循环，继而请求卸载。控制服务不要发送空命令。
+Go 收到空命令或未知命令时会记录告警并请求卸载。
 
 ## 3. Event 与全部变更负载
 
@@ -112,15 +106,15 @@ Bootstrap 正常结束后，Go 建立一条长期双向流，再执行挂载。�
 成功挂载的完整时序：
 
 ```text
-Bootstrap 完成 → 建立 Session → 挂载 → Ready → 变更事件/Barrier
+Bootstrap 完成 → 建立 Session → 挂载 → Ready → 变更事件
 → 卸载 → 剩余已提交事件 → Stopped → 关闭 Go 请求流发送方向 → 退出
 ```
 
-挂载就绪以 `Notice.ready` 为准，正常完成需要结合 `Notice.stopped`、流结束及进程退出状态判断；stdout 或退出码 0 不能替代会话状态检查。挂载失败时也可能出现 Stopped 而没有 Ready。
+挂载就绪以 `Notice.ready` 为准。控制服务收到 `Notice.stopped` 时，前面的事件回调均已完成，会话可以结束。挂载失败时也可能出现 Stopped 而没有 Ready，调用方还需单独检查 Go 进程退出状态。
 
-推荐顺序：控制服务下发 Stop → 继续读取 Event/Barrier → 收到 Stopped → 读取 Go 请求流 EOF → 正常结束服务端响应流。收到 Stop 后不要立即关闭连接。Go 在挂载调用返回后等待通知排空的上限为 10 秒。
+控制服务下发 Stop 后继续读取 Event，收到 Stopped 就结束服务端响应流。Python 的 `wait_closed()` 和 `close()` 以收到 Stopped 为完成条件。收到之前断流会报会话错误，收到之后的断流不影响结果。Go 在挂载调用返回后等待通知排空的上限为 10 秒。
 
-收到 `Command.stop`、Session 接收流 EOF/错误、未知命令、发送失败导致上下文取消，或 `os.Interrupt` / `SIGTERM` 时，Go 请求卸载。若此时挂载尚未初始化，卸载协程会等待初始化或挂载调用结束。`host.Mount` 返回且文件系统回调静止后，Go 将 Stopped 放到已提交事件之后，再等待通知排空。连接断开时无法保证 Stopped 或最后几个事件交付。协议没有重连、重放、持久化、恢复点或跨崩溃恰好一次交付机制。Barrier 回显只表示队列顺序，不是持久化确认。
+收到 `Command.stop`、Session 接收流 EOF/错误、未知命令、发送失败导致上下文取消，或 `os.Interrupt` / `SIGTERM` 时，Go 请求卸载。若此时挂载尚未初始化，卸载协程会等待初始化或挂载调用结束。`host.Mount` 返回且文件系统回调静止后，Go 将 Stopped 放到已提交事件之后，再等待通知排空。连接断开时无法保证 Stopped 或最后几个事件交付。协议没有重连、重放、持久化、恢复点或跨崩溃恰好一次交付机制。
 
 proto 没有自定义错误消息。服务端可通过标准 gRPC status 拒绝请求，例如鉴权失败用 `UNAUTHENTICATED`、重复 Bootstrap 或 Session 顺序错误用 `FAILED_PRECONDITION`；Go 自身的配置/条目/挂载错误写 stderr 并返回进程退出码 1，不会凭空变成服务端 gRPC 错误响应。
 
@@ -143,6 +137,6 @@ from vfspy._rpc import session_pb2_grpc as rpc
 1. 实现 `ControllerServicer.Bootstrap` 与 `Session`，加入鉴权、顺序检查和并行流处理。
 2. 注册服务，配置双向消息上限，监听 `127.0.0.1` 的可用端口。
 3. 以相同 token、端口、挂载点启动 Go，等待 Notice.ready 后使用挂载路径。
-4. 顺序处理 Event，使用 Barrier 协调等待；关闭时遵循 Stop/Stopped 流程。
+4. 顺序处理 Event，关闭时遵循 Stop/Stopped 流程。
 
 在项目根目录运行 `uv run python scripts/generate_proto.py` 可从同一 proto 重新生成两种语言绑定。生成脚本会修正 Python 的相对导入。修改协议后应运行该脚本，确保 Go 与 Python 的服务名、消息类型及字段一致。

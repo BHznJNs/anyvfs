@@ -58,7 +58,7 @@ func Run() error {
 	go func() {
 		defer close(receiverDone)
 		defer close(disconnect)
-		receiveCommands(ctx, stream, fs)
+		receiveCommand(ctx, stream)
 	}()
 	senderDone := make(chan error, 1)
 	go func() {

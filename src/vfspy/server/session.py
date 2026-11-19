@@ -22,32 +22,15 @@ class Session:
         self.commands: asyncio.Queue[pb.Command | None] = asyncio.Queue()
         self.finished = asyncio.Event()
         self._ready_or_finished = asyncio.Event()
-        self._next_barrier = 0
-        self._barriers: dict[int, asyncio.Event] = {}
 
     async def wait_ready(self, timeout: float | None = None):
         await asyncio.wait_for(self._ready_or_finished.wait(), timeout)
         if not self.ready:
             raise self.error or SessionError("session stopped before Ready")
 
-    async def barrier(self, timeout: float | None = None) -> int:
-        self._require_active()
-        if not self.ready or self.stop_requested or self.stopped:
-            raise RuntimeError("barrier requires a ready session without Stop")
-        self._next_barrier += 1
-        barrier_id = self._next_barrier
-        done = asyncio.Event()
-        self._barriers[barrier_id] = done
-        self.commands.put_nowait(pb.Command(barrier=pb.Barrier(id=barrier_id)))
-        # A timed-out barrier stays registered: its late echo is still valid.
-        await asyncio.wait_for(done.wait(), timeout)
-        if self.error is not None:
-            raise self.error
-        return barrier_id
-
     def request_stop(self):
         self._require_active()
-        if not self.stop_requested and not self.stopped:
+        if not self.stop_requested:
             self.stop_requested = True
             self.commands.put_nowait(pb.Command(stop=pb.Stop()))
 
@@ -68,19 +51,16 @@ class Session:
         self.error = error
         self.finished.set()
         self._ready_or_finished.set()
-        for done in self._barriers.values():
-            done.set()
-        self._barriers.clear()
         self.commands.put_nowait(None)
 
     async def receive(self, notices: AsyncIterator[pb.Notice]):
         try:
             async for notice in notices:
                 await self._handle_notice(notice)
-            if not self.stopped:
-                raise ProtocolError("request stream ended without Stopped")
-            if self._barriers:
-                raise ProtocolError("request stream ended with unacknowledged barriers")
+                if self.stopped:
+                    self.finish()
+                    return
+            raise ProtocolError("request stream ended without Stopped")
         except asyncio.CancelledError:
             self.finish(SessionError("notice processing cancelled"))
             raise
@@ -90,13 +70,11 @@ class Session:
             error = SessionError("notice processing failed")
             error.__cause__ = exc
             self.finish(error)
-        else:
-            self.finish()
 
     async def _handle_notice(self, notice: pb.Notice):
         kind = notice.WhichOneof("value")
-        if kind is None or self.stopped:
-            raise ProtocolError("empty notice or notice after Stopped")
+        if kind is None:
+            raise ProtocolError("empty notice")
         if kind == "ready":
             if self.ready:
                 raise ProtocolError("duplicate Ready")
@@ -105,12 +83,6 @@ class Session:
         elif kind == "stopped":
             # Failed mounts may stop without ever reaching Ready.
             self.stopped = True
-            self._ready_or_finished.set()
-        elif kind == "barrier":
-            done = self._barriers.pop(notice.barrier.id, None)
-            if done is None:
-                raise ProtocolError("unknown or duplicate barrier id")
-            done.set()
         elif kind == "event":
             event = notice.event
             if (

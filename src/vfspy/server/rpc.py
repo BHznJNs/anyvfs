@@ -1,6 +1,11 @@
-"""RPC server for a single native bridge mount session.
+"""Receive change notifications for a single native bridge mount session.
+
+External applications access files through the OS mount path. The bridge reports
+committed changes to the control process, where ``on_event`` receives them.
 
 Integration example (the caller manages the bridge subprocess)::
+
+    from asyncio import Event
 
     from vfspy.server import RpcServer
     from vfspy.server.config import InitialEntry, RpcServerConfig
@@ -14,15 +19,15 @@ Integration example (the caller manages the bridge subprocess)::
         ],
     )
 
-    async def run_session():
+    async def run_session(shutdown: Event):
         async with RpcServer(settings, on_event=print) as server:
             # Start the bridge subprocess here:
             # pass server.endpoint as --endpoint;
             # pass server.max_message_bytes as --max-message-bytes;
             # pass server.token only through its ANYVFS_TOKEN environment variable.
             await server.wait_ready(timeout=30)
-            # After operating on the mounted filesystem, wait for preceding callbacks.
-            await server.barrier(timeout=5)
+            # Keep listening while external applications use the mount path.
+            await shutdown.wait()
         # Wait for the bridge to exit and check its exit code here.
 
 Create, use and close the server on the same asyncio event loop.
@@ -32,14 +37,14 @@ Go checks relationships between fields, path components, parent directory order,
 duplicate paths and initial data budgets during import. Message size limits
 include protobuf encoding overhead.
 
-Synchronous callbacks must not block the event loop. Do not await barrier(),
-wait_closed() or close() inside a callback: processing subsequent notices requires
-the current callback to return.
+Synchronous callbacks must not block the event loop. Each event callback must
+return before the next notice can be processed. Await wait_closed() or close()
+outside the callback.
 
-Barrier completion includes all preceding event callbacks. Closing drains notices
-through Stopped and request stream EOF; a drain timeout can leave events
-undelivered. The ready and stopped flags describe observed history; callers must
-still verify mount readiness and the subprocess exit code.
+Closing requests Stop and waits for Stopped. Receiving Stopped completes the
+session after all preceding event callbacks have returned. A drain timeout can
+leave events undelivered. The ready and stopped flags describe observed history.
+Callers must still verify mount readiness and the subprocess exit code.
 """
 
 from __future__ import annotations
@@ -118,23 +123,9 @@ class RpcServer:
         self._endpoint = f"127.0.0.1:{port}"
         return self
 
-    async def __aenter__(self) -> Self:
-        return await self.start()
-
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        try:
-            await self.close()
-        except (SessionError, TimeoutError):
-            if exc_type is None:
-                raise
-
     async def wait_ready(self, timeout: float | None = None):
         self._require_started()
         await self._session.wait_ready(timeout)
-
-    async def barrier(self, timeout: float | None = None) -> int:
-        self._require_started()
-        return await self._session.barrier(timeout)
 
     def request_stop(self):
         self._require_started()
@@ -161,6 +152,16 @@ class RpcServer:
                 await self._server.stop(timeout if session.error is None else None)
         if session.started and session.error is not None:
             raise session.error
+
+    async def __aenter__(self) -> Self:
+        return await self.start()
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        try:
+            await self.close()
+        except (SessionError, TimeoutError):
+            if exc_type is None:
+                raise
 
     def _require_started(self):
         if self._server is None:
@@ -227,4 +228,4 @@ class _ControllerService(rpc.ControllerServicer):
             receiver.cancel()
             with suppress(asyncio.CancelledError):
                 await receiver
-            session.finish(SessionError("Session disconnected before request-stream EOF"))
+            session.finish(SessionError("Session disconnected before Stopped"))
