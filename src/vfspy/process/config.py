@@ -46,5 +46,5 @@ class BridgeProcessConfig(FrozenModel):
 
     def to_env(self) -> dict[str, str]:
         env = os.environ.copy()
-        env["VFSPY_TOKEN"] = self.token
+        env["ANYVFS_TOKEN"] = self.token
         return env

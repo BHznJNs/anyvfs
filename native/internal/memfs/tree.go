@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/winfsp/cgofuse/fuse"
-	"vfspy/native/internal/queue"
-	pb "vfspy/native/internal/rpc"
+	"anyvfs/native/internal/queue"
+	pb "anyvfs/native/internal/rpc"
 )
 
 type node struct {

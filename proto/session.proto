@@ -1,6 +1,6 @@
 syntax = "proto3";
-package vfspy;
-option go_package = "vfspy/native/internal/rpc;rpc";
+package anyvfs;
+option go_package = "anyvfs/native/internal/rpc;rpc";
 
 // No filesystem read/write RPC: OS requests execute entirely in Go memory.
 service Controller {

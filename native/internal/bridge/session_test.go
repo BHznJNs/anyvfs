@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"vfspy/native/internal/queue"
-	pb "vfspy/native/internal/rpc"
+	"anyvfs/native/internal/queue"
+	pb "anyvfs/native/internal/rpc"
 )
 
 type noticeStream struct {

@@ -3,9 +3,9 @@ package bridge
 import (
 	"runtime"
 
-	"vfspy/native/internal/memfs"
-	"vfspy/native/internal/queue"
-	pb "vfspy/native/internal/rpc"
+	"anyvfs/native/internal/memfs"
+	"anyvfs/native/internal/queue"
+	pb "anyvfs/native/internal/rpc"
 
 	"github.com/winfsp/cgofuse/fuse"
 )
@@ -27,16 +27,16 @@ func newFuseHost(fs *memfs.FS, caseSensitive bool, notices *queue.Queue[*pb.Noti
 	case "linux":
 		// libfuse uses fsname for the mount source and rejects volname.
 		// auto_unmount lets fusermount unmount when this process exits.
-		options = append(options, "-o", "fsname=vfspy", "-o", "auto_unmount")
+		options = append(options, "-o", "fsname=anyvfs", "-o", "auto_unmount")
 	case "windows":
 		// WinFsp unmounts on process exit by default.
-		options = append(options, "-o", "volname=vfspy", "-o", "uid=-1,gid=-1")
+		options = append(options, "-o", "volname=anyvfs", "-o", "uid=-1,gid=-1")
 	case "darwin":
 		// The default macFUSE VFS backend unmounts if a kernel request goes
 		// unanswered for daemon_timeout (60 seconds by default).
-		options = append(options, "-o", "volname=vfspy")
+		options = append(options, "-o", "volname=anyvfs")
 	default:
-		options = append(options, "-o", "volname=vfspy")
+		options = append(options, "-o", "volname=anyvfs")
 	}
 
 	return &FuseHost{FileSystemHost: host, options: options, notices: notices}

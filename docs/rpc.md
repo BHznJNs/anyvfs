@@ -4,16 +4,16 @@
 
 ## 角色与服务
 
-控制进程（可用 Python 或其他语言）是 **gRPC 服务端**；Go 挂载进程是 **gRPC 客户端**，主动连接控制服务，不监听 RPC 端口。proto 使用 `proto3`，package 为 `vfspy`，service 为 `Controller`。
+控制进程（可用 Python 或其他语言）是 **gRPC 服务端**；AnyVFS Go 挂载进程是 **gRPC 客户端**，主动连接控制服务，不监听 RPC 端口。proto 使用 `proto3`，package 为 `anyvfs`，service 为 `Controller`。
 
 | 完整 RPC 路径 | 请求 | 响应 | 流类型 | 用途 |
 | --- | --- | --- | --- | --- |
-| `/vfspy.Controller/Bootstrap` | `Empty`，Go → 控制进程 | `BootstrapItem`，控制进程 → Go | unary → stream | 一次性下发配置和初始文件树 |
-| `/vfspy.Controller/Session` | `Notice` 流，Go → 控制进程 | `Command` 流，控制进程 → Go | stream ↔ stream | 挂载状态、变更通知、同步屏障及停止命令 |
+| `/anyvfs.Controller/Bootstrap` | `Empty`，Go → 控制进程 | `BootstrapItem`，控制进程 → Go | unary → stream | 一次性下发配置和初始文件树 |
+| `/anyvfs.Controller/Session` | `Notice` 流，Go → 控制进程 | `Command` 流，控制进程 → Go | stream ↔ stream | 挂载状态、变更通知、同步屏障及停止命令 |
 
 全部接口只有以上两个 RPC。没有单独的文件读、写、列表、快照、健康检查或日志 RPC；文件访问通过挂载路径进行。
 
-连接限定 `127.0.0.1:端口`，无 TLS，Go 禁用代理和自动 RPC 重试。Go 从子进程环境读取非空的 `VFSPY_TOKEN` 后，立即清除自身环境中的该变量，并在每个 RPC 的 metadata 中附带 `authorization: Bearer <token>`。清除操作不影响父进程环境；Python 启动示例通过 `subprocess.run(..., env=...)` 仅向子进程传入 token。服务端必须校验它；鉴权并未由 proto 或生成的服务基类实现。建议一个 token 对应一次挂载会话，使用不可预测的随机值。
+连接限定 `127.0.0.1:端口`，无 TLS，Go 禁用代理和自动 RPC 重试。Go 从子进程环境读取非空的 `ANYVFS_TOKEN` 后，立即清除自身环境中的该变量，并在每个 RPC 的 metadata 中附带 `authorization: Bearer <token>`。清除操作不影响父进程环境；Python 启动示例通过 `subprocess.run(..., env=...)` 仅向子进程传入 token。服务端必须校验它；鉴权并未由 proto 或生成的服务基类实现。建议一个 token 对应一次挂载会话，使用不可预测的随机值。
 
 ## 1. Bootstrap
 
@@ -131,7 +131,7 @@ proto 没有自定义错误消息。服务端可通过标准 gRPC status 拒绝�
 | 语言 | 路径 | 生成入口 |
 | --- | --- | --- |
 | Python | `src/vfspy/_rpc/session_pb2.py`、`session_pb2.pyi`、`session_pb2_grpc.py` | `pb.Config` 等消息，`rpc.ControllerServicer`、`rpc.add_ControllerServicer_to_server`、`rpc.ControllerStub` |
-| Go | `native/internal/rpc/session.pb.go`、`session_grpc.pb.go` | `rpc.NewControllerClient` 及消息类型；Go 生成包声明为 `rpc`，import 路径是 `vfspy/native/internal/rpc` |
+| Go | `native/internal/rpc/session.pb.go`、`session_grpc.pb.go` | `rpc.NewControllerClient` 及消息类型；Go 生成包声明为 `rpc`，import 路径是 `anyvfs/native/internal/rpc` |
 
 Python 导入：
 

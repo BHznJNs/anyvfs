@@ -1,8 +1,8 @@
-# Go 原生文件系统进程
+# AnyVFS Go 原生文件系统进程
 
 Go 程序负责内存中的目录树、文件内容、inode、句柄、容量限制与 WinFsp/FUSE 挂载。系统文件读写直接在 Go 中完成，文件变更通过 gRPC 上报给控制进程。
 
-入口为 [`main.go`](main.go)，Go 模块名为 `vfspy/native`，`go.mod` 要求 Go 1.23.0。控制通信的接口、鉴权、消息和生命周期统一见 [RPC 文档](../docs/rpc.md)。
+入口为 [`main.go`](main.go)，Go 模块名为 `anyvfs/native`，`go.mod` 要求 Go 1.23.0。控制通信的接口、鉴权、消息和生命周期统一见 [RPC 文档](../docs/rpc.md)。Python 客户端包仍名为 `vfspy`。
 
 ## 构建
 
@@ -10,7 +10,7 @@ Go 程序负责内存中的目录树、文件内容、inode、句柄、容量限
 
 ## 启动与命令行参数
 
-启动前需准备好控制服务，接入流程见 [RPC 文档](../docs/rpc.md)。下面的示例假定控制服务已监听 `127.0.0.1:50051`、使用相同 token；Windows 下 `Z:` 空闲，其他平台下 `/mnt/vfspy` 是可用的挂载目录：
+启动前需准备好控制服务，接入流程见 [RPC 文档](../docs/rpc.md)。下面的示例假定控制服务已监听 `127.0.0.1:50051`、使用相同 token；Windows 下 `Z:` 空闲，其他平台下 `/mnt/anyvfs` 是可用的挂载目录：
 
 ```python
 import os
@@ -18,15 +18,15 @@ import subprocess
 from pathlib import Path
 
 root = Path.cwd()
-executable = "vfspy-native.exe" if os.name == "nt" else "vfspy-native"
+executable = "anyvfs-native.exe" if os.name == "nt" else "anyvfs-native"
 bridge = root / "bin" / executable
-env = {**os.environ, "VFSPY_TOKEN": "replace-with-controller-session-token"}
+env = {**os.environ, "ANYVFS_TOKEN": "replace-with-controller-session-token"}
 
 subprocess.run(
     [
         str(bridge),
         "--endpoint", "127.0.0.1:50051",
-        "--mountpoint", "Z:" if os.name == "nt" else "/mnt/vfspy",
+        "--mountpoint", "Z:" if os.name == "nt" else "/mnt/anyvfs",
         "--max-message-bytes", "16777216",
         "--startup-timeout", "25s",
     ],
@@ -49,7 +49,7 @@ subprocess.run(
 
 ### 环境变量与标准输入
 
-`VFSPY_TOKEN` 为必填的会话 token，通过子进程环境传入；鉴权与传输规则见 [RPC 文档](../docs/rpc.md)。
+`ANYVFS_TOKEN` 为必填的会话 token，通过子进程环境传入；鉴权与传输规则见 [RPC 文档](../docs/rpc.md)。
 
 程序不读取 stdin，不从命令行接收文件树或 JSON。初始化数据由控制服务提供，格式见 [RPC 文档](../docs/rpc.md)。
 

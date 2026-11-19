@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	pb "vfspy/native/internal/rpc"
+	pb "anyvfs/native/internal/rpc"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

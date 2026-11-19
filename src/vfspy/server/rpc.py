@@ -19,7 +19,7 @@ Integration example (the caller manages the bridge subprocess)::
             # Start the bridge subprocess here:
             # pass server.endpoint as --endpoint;
             # pass server.max_message_bytes as --max-message-bytes;
-            # pass server.token only through its VFSPY_TOKEN environment variable.
+            # pass server.token only through its ANYVFS_TOKEN environment variable.
             await server.wait_ready(timeout=30)
             # After operating on the mounted filesystem, wait for preceding callbacks.
             await server.barrier(timeout=5)

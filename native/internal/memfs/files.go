@@ -2,7 +2,7 @@ package memfs
 
 import (
 	"github.com/winfsp/cgofuse/fuse"
-	pb "vfspy/native/internal/rpc"
+	pb "anyvfs/native/internal/rpc"
 )
 
 func (f *FS) newHandle(n *node, flags int) uint64 {

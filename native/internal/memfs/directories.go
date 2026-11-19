@@ -3,7 +3,7 @@ package memfs
 import (
 	"github.com/winfsp/cgofuse/fuse"
 	"sort"
-	pb "vfspy/native/internal/rpc"
+	pb "anyvfs/native/internal/rpc"
 )
 
 func (f *FS) Opendir(p string) (int, uint64) {

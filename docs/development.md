@@ -44,13 +44,13 @@ uvx cibuildwheel==4.3.5 --output-dir dist
 
 ### Wheel 发布
 
-构建发布的 wheel 包内包含 Go bridge，Windows 路径为 `vfspy/_bin/vfspy-native.exe`，Linux 路径为 `vfspy/_bin/vfspy-native`。可通过包资源定位：
+构建发布的 wheel 包内包含 Go bridge，Windows 路径为 `vfspy/_bin/anyvfs-native.exe`，Linux 路径为 `vfspy/_bin/anyvfs-native`。可通过包资源定位：
 
 ```python
 import os
 from importlib.resources import files
 
-bridge = files("vfspy").joinpath("_bin", "vfspy-native.exe" if os.name == "nt" else "vfspy-native")
+bridge = files("vfspy").joinpath("_bin", "anyvfs-native.exe" if os.name == "nt" else "anyvfs-native")
 ```
 
 wheel 使用 `py3-none-<platform>` 标签，支持 Python 3.11+，不绑定特定 CPython ABI。安装 wheel 不需要 Go 工具链，实际挂载仍需 WinFsp/FUSE 运行时。

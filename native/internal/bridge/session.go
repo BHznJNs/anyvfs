@@ -4,9 +4,9 @@ import (
 	"context"
 	"log/slog"
 
-	"vfspy/native/internal/memfs"
-	"vfspy/native/internal/queue"
-	pb "vfspy/native/internal/rpc"
+	"anyvfs/native/internal/memfs"
+	"anyvfs/native/internal/queue"
+	pb "anyvfs/native/internal/rpc"
 )
 
 func receiveCommands(ctx context.Context, stream pb.Controller_SessionClient, fs *memfs.FS) {

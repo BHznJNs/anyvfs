@@ -55,9 +55,9 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
     async def test_arguments_and_environment(self):
         mountpoint = "mount dir & $(literal)"
         process = self.process(mountpoint=mountpoint, max_message_bytes=2048, startup_timeout=0.125)
-        with patch.dict(os.environ, {"VFSPY_TOKEN": "parent-secret"}):
+        with patch.dict(os.environ, {"ANYVFS_TOKEN": "parent-secret"}):
             self.assertIs(await process.start(), process)
-            self.assertEqual(os.environ["VFSPY_TOKEN"], "parent-secret")
+            self.assertEqual(os.environ["ANYVFS_TOKEN"], "parent-secret")
         expected = [
             "--endpoint",
             "127.0.0.1:12345",
@@ -70,7 +70,7 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
         ]
         argv, kwargs = self.calls[0]
         self.assertEqual(argv, (str(Path(sys.executable).resolve()), *expected))
-        self.assertEqual(kwargs["env"]["VFSPY_TOKEN"], "child-secret")
+        self.assertEqual(kwargs["env"]["ANYVFS_TOKEN"], "child-secret")
         self.assertNotIn("child-secret", argv)
         self.assertNotIn("shell", kwargs)
         self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
@@ -186,7 +186,7 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
     async def test_bundled_executable_resolution(self):
         with tempfile.TemporaryDirectory() as folder:
             package = Path(folder)
-            name = "vfspy-native.exe" if os.name == "nt" else "vfspy-native"
+            name = "anyvfs-native.exe" if os.name == "nt" else "anyvfs-native"
             binary = package / "_bin" / name
             binary.parent.mkdir()
             binary.touch()

@@ -9,7 +9,7 @@ def build_bridge() -> Path:
     """Compile the bridge and return the absolute path to its executable."""
     root = Path(__file__).resolve().parents[1]
     suffix = ".exe" if os.name == "nt" else ""
-    output = root / "bin" / ("vfspy-native" + suffix)
+    output = root / "bin" / ("anyvfs-native" + suffix)
     output.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     if os.name == "nt":

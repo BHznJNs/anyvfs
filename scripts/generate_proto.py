@@ -16,7 +16,9 @@ def main():
         "google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.6",
         "google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1",
     ):
-        subprocess.run(["go", "install", module], check=True, env=env)
+        executable = module.split("/")[-1].split("@")[0] + (".exe" if os.name == "nt" else "")
+        if not (tool_bin / executable).exists():
+            subprocess.run(["go", "install", module], check=True, env=env)
     python_out = ROOT / "src/vfspy/_rpc"
     go_out = ROOT / "native/internal/rpc"
     python_out.mkdir(parents=True, exist_ok=True)

@@ -3,7 +3,7 @@ package memfs
 import (
 	"github.com/winfsp/cgofuse/fuse"
 	"time"
-	pb "vfspy/native/internal/rpc"
+	pb "anyvfs/native/internal/rpc"
 )
 
 func (f *FS) Getattr(p string, st *fuse.Stat_t, fh uint64) int {

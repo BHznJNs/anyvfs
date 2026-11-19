@@ -4,4 +4,4 @@ from PyInstaller.utils.hooks import collect_data_files
 
 # Collect executable resources as binaries so dependencies and executable
 # permissions are handled by PyInstaller, including in onefile builds.
-binaries = collect_data_files("vfspy", includes=["_bin/vfspy-native", "_bin/vfspy-native.exe"])
+binaries = collect_data_files("vfspy", includes=["_bin/anyvfs-native", "_bin/anyvfs-native.exe"])

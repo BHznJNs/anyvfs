@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"os"
 
-	"vfspy/native/internal/bridge"
+	"anyvfs/native/internal/bridge"
 )
 
 func main() {

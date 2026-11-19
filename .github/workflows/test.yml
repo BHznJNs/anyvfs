@@ -105,4 +105,4 @@ jobs:
       - name: Run Go vet
         run: go vet -mod=readonly ./...
       - name: Build native bridge
-        run: go build -mod=readonly -trimpath -o ../bin/vfspy-native${{ runner.os == 'Windows' && '.exe' || '' }} .
+        run: go build -mod=readonly -trimpath -o ../bin/anyvfs-native${{ runner.os == 'Windows' && '.exe' || '' }} .

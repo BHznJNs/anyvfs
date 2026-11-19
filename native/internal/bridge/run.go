@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"vfspy/native/internal/memfs"
-	"vfspy/native/internal/queue"
-	pb "vfspy/native/internal/rpc"
+	"anyvfs/native/internal/memfs"
+	"anyvfs/native/internal/queue"
+	pb "anyvfs/native/internal/rpc"
 )
 
 // Run starts the filesystem bridge and waits for shutdown.

@@ -24,8 +24,8 @@ func parseInput() (programInput, error) {
 	flag.DurationVar(&input.startupTimeout, "startup-timeout", 25*time.Second, "bootstrap deadline")
 	flag.Parse()
 
-	input.token = os.Getenv("VFSPY_TOKEN")
-	os.Unsetenv("VFSPY_TOKEN")
+	input.token = os.Getenv("ANYVFS_TOKEN")
+	os.Unsetenv("ANYVFS_TOKEN")
 	hostIP, _, err := net.SplitHostPort(input.endpoint)
 	if err != nil || hostIP != "127.0.0.1" || input.token == "" || input.mountpoint == "" || input.startupTimeout <= 0 {
 		return input, fmt.Errorf("loopback endpoint, token, mountpoint and positive startup timeout required")

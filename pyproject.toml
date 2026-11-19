@@ -1,7 +1,7 @@
 [project]
 name = "vfspy"
 version = "0.1.0"
-description = "Generated gRPC bindings for the vfspy native filesystem bridge"
+description = "Python client package for the AnyVFS native filesystem bridge"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["grpcio>=1.78,<2", "protobuf>=6.31.1,<7", "pydantic>=2.10,<3"]

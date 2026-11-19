@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/winfsp/cgofuse/fuse"
-	"vfspy/native/internal/queue"
-	pb "vfspy/native/internal/rpc"
+	"anyvfs/native/internal/queue"
+	pb "anyvfs/native/internal/rpc"
 )
 
 func newFS(t *testing.T, sensitive bool, file, total int64) (*FS, *queue.Queue[*pb.Notice]) {
