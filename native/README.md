@@ -73,7 +73,3 @@ subprocess.run(
 | `2` | 标准 flag 解析错误，例如未知选项或 duration 格式错误。 |
 
 崩溃或强制终止的退出状态由操作系统决定。退出码 0 本身不代表会话全过程成功，判断方式见 [RPC 文档](../docs/rpc.md)。
-
-## 挂载选项
-
-固定挂载选项：`-f`、`volname=vfspy`、`attr_timeout=0`、`entry_timeout=0`、`negative_timeout=0`；Windows 另加 `uid=-1,gid=-1`。大小写行为由初始化配置决定。

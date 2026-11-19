@@ -22,10 +22,23 @@ func newFuseHost(fs *memfs.FS, caseSensitive bool, notices *queue.Queue[*pb.Noti
 	host.SetCapReaddirPlus(true)
 	host.SetCapOpenTrunc(true)
 
-	options := []string{"-f", "-o", "volname=vfspy", "-o", "attr_timeout=0", "-o", "entry_timeout=0", "-o", "negative_timeout=0"}
-	if runtime.GOOS == "windows" {
-		options = append(options, "-o", "uid=-1,gid=-1")
+	options := []string{"-f", "-o", "attr_timeout=0", "-o", "entry_timeout=0", "-o", "negative_timeout=0"}
+	switch runtime.GOOS {
+	case "linux":
+		// libfuse uses fsname for the mount source and rejects volname.
+		// auto_unmount lets fusermount unmount when this process exits.
+		options = append(options, "-o", "fsname=vfspy", "-o", "auto_unmount")
+	case "windows":
+		// WinFsp unmounts on process exit by default.
+		options = append(options, "-o", "volname=vfspy", "-o", "uid=-1,gid=-1")
+	case "darwin":
+		// The default macFUSE VFS backend unmounts if a kernel request goes
+		// unanswered for daemon_timeout (60 seconds by default).
+		options = append(options, "-o", "volname=vfspy")
+	default:
+		options = append(options, "-o", "volname=vfspy")
 	}
+
 	return &FuseHost{FileSystemHost: host, options: options, notices: notices}
 }
 
