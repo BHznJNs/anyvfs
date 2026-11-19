@@ -1,6 +1,6 @@
-# vfspy
+# AnyVFS
 
-vfspy 是一个基于 [cgofuse](https://github.com/winfsp/cgofuse) 实现的可实际挂载的虚拟文件系统库
+AnyVFS 是一个基于 [cgofuse](https://github.com/winfsp/cgofuse) 实现的可实际挂载的虚拟文件系统库
 
 ## 文档
 
