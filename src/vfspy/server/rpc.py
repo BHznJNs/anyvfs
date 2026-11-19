@@ -60,7 +60,7 @@ from .session import EventHandler, Session
 
 
 class RpcServer:
-    def __init__(self, settings: RpcServerConfig, *, on_event: EventHandler | None = None) -> None:
+    def __init__(self, settings: RpcServerConfig, *, on_event: EventHandler | None = None):
         self._settings = settings
         self._token = secrets.token_urlsafe(32)
         self._session = Session(on_event)
@@ -121,14 +121,14 @@ class RpcServer:
     async def __aenter__(self) -> Self:
         return await self.start()
 
-    async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+    async def __aexit__(self, exc_type, exc_value, traceback):
         try:
             await self.close()
         except (SessionError, TimeoutError):
             if exc_type is None:
                 raise
 
-    async def wait_ready(self, timeout: float | None = None) -> None:
+    async def wait_ready(self, timeout: float | None = None):
         self._require_started()
         await self._session.wait_ready(timeout)
 
@@ -136,15 +136,15 @@ class RpcServer:
         self._require_started()
         return await self._session.barrier(timeout)
 
-    def request_stop(self) -> None:
+    def request_stop(self):
         self._require_started()
         self._session.request_stop()
 
-    async def wait_closed(self, timeout: float | None = None) -> None:
+    async def wait_closed(self, timeout: float | None = None):
         self._require_started()
         await self._session.wait_closed(timeout)
 
-    async def close(self, timeout: float = 10.0) -> None:
+    async def close(self, timeout: float = 10.0):
         if self._closed:
             return
         self._closing = True
@@ -162,18 +162,18 @@ class RpcServer:
         if session.started and session.error is not None:
             raise session.error
 
-    def _require_started(self) -> None:
+    def _require_started(self):
         if self._server is None:
             raise RuntimeError("server has not started")
 
 
 class _ControllerService(rpc.ControllerServicer):
-    def __init__(self, owner: RpcServer) -> None:
+    def __init__(self, owner: RpcServer):
         self._owner = owner
         self._bootstrap_started = False
         self._bootstrap_complete = False
 
-    async def _authorize(self, context: grpc.aio.ServicerContext) -> None:
+    async def _authorize(self, context: grpc.aio.ServicerContext):
         values = [v for k, v in context.invocation_metadata() if k == "authorization"]
         expected = f"Bearer {self._owner.token}".encode("ascii")
         if len(values) != 1 or not secrets.compare_digest(values[0].encode("utf-8"), expected):
@@ -206,7 +206,7 @@ class _ControllerService(rpc.ControllerServicer):
 
     async def Session(  # noqa: N802
         self, request_iterator: AsyncIterator[pb.Notice], context: grpc.aio.ServicerContext
-    ) -> None:
+    ):
         await self._authorize(context)
         session = self._owner._session
         if not self._bootstrap_complete or session.started or session.finished.is_set():

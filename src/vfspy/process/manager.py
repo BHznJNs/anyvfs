@@ -18,7 +18,7 @@ from .config import BridgeProcessConfig
 
 
 class BridgeProcess:
-    def __init__(self, settings: BridgeProcessConfig) -> None:
+    def __init__(self, settings: BridgeProcessConfig):
         self._settings = settings
         self._executable = (
             settings.executable.resolve()
@@ -46,7 +46,7 @@ class BridgeProcess:
             )
         return self
 
-    async def close(self) -> None:
+    async def close(self):
         async with self._lifecycle_lock:
             if not self.is_running: return
             process = self._process
@@ -69,5 +69,5 @@ class BridgeProcess:
     async def __aenter__(self) -> Self:
         return await self.start()
 
-    async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self.close()

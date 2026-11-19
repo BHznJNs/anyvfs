@@ -11,7 +11,7 @@ EventHandler = Callable[[pb.Event], Awaitable[None] | None]
 
 
 class Session:
-    def __init__(self, on_event: EventHandler | None = None) -> None:
+    def __init__(self, on_event: EventHandler | None = None):
         self.on_event = on_event
         self.started = False
         self.ready = False
@@ -25,7 +25,7 @@ class Session:
         self._next_barrier = 0
         self._barriers: dict[int, asyncio.Event] = {}
 
-    async def wait_ready(self, timeout: float | None = None) -> None:
+    async def wait_ready(self, timeout: float | None = None):
         await asyncio.wait_for(self._ready_or_finished.wait(), timeout)
         if not self.ready:
             raise self.error or SessionError("session stopped before Ready")
@@ -45,24 +45,24 @@ class Session:
             raise self.error
         return barrier_id
 
-    def request_stop(self) -> None:
+    def request_stop(self):
         self._require_active()
         if not self.stop_requested and not self.stopped:
             self.stop_requested = True
             self.commands.put_nowait(pb.Command(stop=pb.Stop()))
 
-    async def wait_closed(self, timeout: float | None = None) -> None:
+    async def wait_closed(self, timeout: float | None = None):
         await asyncio.wait_for(self.finished.wait(), timeout)
         if self.error is not None:
             raise self.error
 
-    def _require_active(self) -> None:
+    def _require_active(self):
         if self.error is not None:
             raise self.error
         if not self.started or self.finished.is_set():
             raise RuntimeError("no active session")
 
-    def finish(self, error: SessionError | None = None) -> None:
+    def finish(self, error: SessionError | None = None):
         if self.finished.is_set():
             return
         self.error = error
@@ -73,7 +73,7 @@ class Session:
         self._barriers.clear()
         self.commands.put_nowait(None)
 
-    async def receive(self, notices: AsyncIterator[pb.Notice]) -> None:
+    async def receive(self, notices: AsyncIterator[pb.Notice]):
         try:
             async for notice in notices:
                 await self._handle_notice(notice)
@@ -93,7 +93,7 @@ class Session:
         else:
             self.finish()
 
-    async def _handle_notice(self, notice: pb.Notice) -> None:
+    async def _handle_notice(self, notice: pb.Notice):
         kind = notice.WhichOneof("value")
         if kind is None or self.stopped:
             raise ProtocolError("empty notice or notice after Stopped")
