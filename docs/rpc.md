@@ -112,7 +112,7 @@ Bootstrap 完成 → 建立 Session → 挂载 → Ready → 变更事件
 
 挂载就绪以 `Notice.ready` 为准。控制服务收到 `Notice.stopped` 时，前面的事件回调均已完成，会话可以结束。挂载失败时也可能出现 Stopped 而没有 Ready，调用方还需单独检查 Go 进程退出状态。
 
-控制服务下发 Stop 后继续读取 Event，收到 Stopped 就结束服务端响应流。Python 的 `wait_closed()` 和 `close()` 以收到 Stopped 为完成条件。收到之前断流会报会话错误，收到之后的断流不影响结果。Go 在挂载调用返回后等待通知排空的上限为 10 秒。
+控制服务下发 Stop 后继续读取 Event，收到 Stopped 就结束服务端响应流。服务端以收到 Stopped 为完成条件。收到之前断流会报会话错误，收到之后的断流不影响结果。
 
 收到 `Command.stop`、Session 接收流 EOF/错误、未知命令、发送失败导致上下文取消，或 `os.Interrupt` / `SIGTERM` 时，Go 请求卸载。若此时挂载尚未初始化，卸载协程会等待初始化或挂载调用结束。`host.Mount` 返回且文件系统回调静止后，Go 将 Stopped 放到已提交事件之后，再等待通知排空。连接断开时无法保证 Stopped 或最后几个事件交付。协议没有重连、重放、持久化、恢复点或跨崩溃恰好一次交付机制。
 

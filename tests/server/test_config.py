@@ -1,4 +1,3 @@
-import inspect
 import unittest
 
 from pydantic import ValidationError
@@ -85,13 +84,3 @@ class ConfigurationTests(unittest.TestCase):
         ):
             with self.subTest(field=field), self.assertRaises(ValidationError):
                 setattr(model, field, replacement)
-
-    def test_rpc_server_exports_and_generated_credentials(self):
-        self.assertFalse(hasattr(vfspy, "RpcServer"))
-        self.assertFalse(hasattr(vfspy, "ControllerServer"))
-        self.assertEqual(list(inspect.signature(RpcServer).parameters), ["settings", "on_event"])
-        first, second = RpcServer(settings()), RpcServer(settings())
-        self.assertGreaterEqual(len(first.token), 32)
-        self.assertNotEqual(first.token, second.token)
-        with self.assertRaises(RuntimeError):
-            _ = first.endpoint

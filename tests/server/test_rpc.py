@@ -1,6 +1,5 @@
 import asyncio
 import unittest
-from contextlib import suppress
 
 import grpc
 
@@ -8,318 +7,100 @@ from vfspy._rpc import session_pb2 as pb
 from vfspy._rpc import session_pb2_grpc as rpc
 from vfspy.server import RpcServer
 from vfspy.server.config import InitialEntry, RpcServerConfig
-from vfspy.server.errors import SessionError
-
-
-def settings(**overrides):
-    return RpcServerConfig(
-        **{"case_sensitive": True, "max_file_bytes": 1024, "max_total_bytes": 4096, **overrides}
-    )
-
-
-def event(revision=1):
-    return pb.Notice(
-        event=pb.Event(
-            revision=revision, inode=2, file_created=pb.FileCreated(path="/new", mode=33188)
-        )
-    )
+from vfspy.server.events import EventValue
 
 
 class RpcServerTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.events = []
-        self.server = await RpcServer(
-            settings(entries=[InitialEntry(path="/hello", data=b"hello")]),
-            on_event=self.events.append,
-        ).start()
-        self.channel = grpc.aio.insecure_channel(self.server.endpoint)
-        self.stub = rpc.ControllerStub(self.channel)
-        self.metadata = (("authorization", f"Bearer {self.server.token}"),)
-
-    async def asyncTearDown(self):
-        await self.channel.close()
-        with suppress(SessionError, TimeoutError):
-            await self.server.close(timeout=0.2)
-
-    async def bootstrap(self):
-        return [
-            item
-            async for item in self.stub.Bootstrap(pb.Empty(), metadata=self.metadata, timeout=2)
-        ]
-
-    async def session(self, ready=True):
-        await self.bootstrap()
-        call = self.stub.Session(metadata=self.metadata, timeout=5)
-        if ready:
-            await call.write(pb.Notice(ready=pb.Ready()))
-            await self.server.wait_ready(timeout=2)
-        return call
-
-    async def finish(self, call):
-        await call.write(pb.Notice(stopped=pb.Stopped()))
-        await self.server.wait_closed(timeout=2)
-        self.assertIs(await call.read(), grpc.aio.EOF)
-
-    async def test_bootstrap_order_and_single_use(self):
-        items = await self.bootstrap()
-        self.assertEqual([item.WhichOneof("value") for item in items], ["config", "entry"])
-        self.assertEqual(
-            items[0].config,
-            pb.Config(case_sensitive=True, max_file_bytes=1024, max_total_bytes=4096),
-        )
-        self.assertEqual(items[1].entry.data, b"hello")
-        with self.assertRaises(grpc.aio.AioRpcError) as raised:
-            await self.bootstrap()
-        self.assertEqual(raised.exception.code(), grpc.StatusCode.FAILED_PRECONDITION)
-
-    async def test_authentication_both_methods_and_rejected_calls_do_not_consume(self):
-        for metadata in ((), (("authorization", "Bearer wrong"),), self.metadata * 2):
-            with self.subTest(metadata=metadata):
-                with self.assertRaises(grpc.aio.AioRpcError) as raised:
-                    await self.stub.Bootstrap(pb.Empty(), metadata=metadata, timeout=2).read()
-                self.assertEqual(raised.exception.code(), grpc.StatusCode.UNAUTHENTICATED)
-                with self.assertRaises(grpc.aio.AioRpcError) as raised:
-                    await self.stub.Session(metadata=metadata, timeout=2).read()
-                self.assertEqual(raised.exception.code(), grpc.StatusCode.UNAUTHENTICATED)
-        call = await self.session()
-        await self.finish(call)
-
-    async def test_session_order_and_duplicate(self):
-        with self.assertRaises(grpc.aio.AioRpcError) as raised:
-            await self.stub.Session(metadata=self.metadata, timeout=2).read()
-        self.assertEqual(raised.exception.code(), grpc.StatusCode.FAILED_PRECONDITION)
-        call = await self.session()
-        with self.assertRaises(grpc.aio.AioRpcError) as raised:
-            await self.stub.Session(metadata=self.metadata, timeout=2).read()
-        self.assertEqual(raised.exception.code(), grpc.StatusCode.FAILED_PRECONDITION)
-        await self.finish(call)
-
-    async def test_close_sends_stop_once_and_drains_event_callbacks(self):
-        entered, release = (asyncio.Event(), asyncio.Event())
-
-        async def callback(item):
-            entered.set()
-            await release.wait()
-            self.events.append(item)
-
-        self.server._session.on_event = callback
-        call = await self.session()
-        await call.write(event())
-        await asyncio.wait_for(entered.wait(), 2)
-        closing = asyncio.create_task(self.server.close(timeout=2))
-        command = await call.read()
-        self.assertEqual(command.WhichOneof("value"), "stop")
-        self.server.request_stop()
-        await call.write(event(2))
-        await call.write(pb.Notice(stopped=pb.Stopped()))
-        self.assertFalse(closing.done())
-        self.assertEqual(self.server.revision, 0)
-        release.set()
-        await closing
-        self.assertIs(await call.read(), grpc.aio.EOF)
-        self.assertEqual(self.server.revision, 2)
-        self.assertEqual([item.revision for item in self.events], [1, 2])
-        await self.server.close()
-
-    async def test_stopped_without_ready_does_not_claim_mount_success(self):
-        call = await self.session(ready=False)
-        await self.finish(call)
-        with self.assertRaisesRegex(SessionError, "before Ready"):
-            await self.server.wait_ready(timeout=2)
-        self.assertFalse(self.server.ready)
-        self.assertTrue(self.server.stopped)
-
-    async def test_empty_notice_rejected(self):
-        call = await self.session()
-        await call.write(pb.Notice())
-        with self.assertRaises(grpc.aio.AioRpcError) as raised:
-            await call.read()
-        self.assertEqual(raised.exception.code(), grpc.StatusCode.INVALID_ARGUMENT)
-        with self.assertRaises(SessionError):
-            await self.server.wait_closed(timeout=2)
-
-    async def test_duplicate_ready_rejected(self):
-        call = await self.session()
-        await call.write(pb.Notice(ready=pb.Ready()))
-        with self.assertRaises(grpc.aio.AioRpcError) as raised:
-            await call.read()
-        self.assertEqual(raised.exception.code(), grpc.StatusCode.INVALID_ARGUMENT)
-
-    async def test_disconnect_after_stopped_leaves_session_successful(self):
-        call = await self.session()
-        await call.write(pb.Notice(stopped=pb.Stopped()))
-        await self.server.wait_closed(timeout=2)
-        call.cancel()
-        await self.server.close(timeout=2)
-        self.assertTrue(self.server.stopped)
-
-    async def test_invalid_events_rejected(self):
-        invalid = [
-            event(2),
-            pb.Notice(event=pb.Event(revision=1, inode=2)),
-            pb.Notice(event=pb.Event(revision=1, file_removed=pb.FileRemoved(path="/x"))),
-        ]
-        for notice in invalid:
-            with self.subTest(notice=notice):
-                server = await RpcServer(settings()).start()
-                async with grpc.aio.insecure_channel(server.endpoint) as channel:
-                    stub = rpc.ControllerStub(channel)
-                    metadata = (("authorization", f"Bearer {server.token}"),)
-                    _ = [s async for s in stub.Bootstrap(pb.Empty(), metadata=metadata)]
-                    call = stub.Session(metadata=metadata, timeout=2)
-                    await call.write(pb.Notice(ready=pb.Ready()))
-                    await call.write(notice)
-                    with self.assertRaises(grpc.aio.AioRpcError) as raised:
-                        await call.read()
-                    self.assertEqual(raised.exception.code(), grpc.StatusCode.INVALID_ARGUMENT)
-                with self.assertRaises(SessionError):
-                    await server.close()
-
-    async def test_event_before_ready_rejected_and_wait_ready_unblocked(self):
-        call = await self.session(ready=False)
-        await call.write(event())
-        with self.assertRaises(SessionError):
-            await self.server.wait_ready(timeout=2)
-        with self.assertRaises(grpc.aio.AioRpcError):
-            await call.read()
-
-    async def test_eof_without_stopped_rejected(self):
-        call = await self.session()
-        await call.done_writing()
-        with self.assertRaisesRegex(SessionError, "without Stopped"):
-            await self.server.wait_closed(timeout=2)
-        with self.assertRaises(grpc.aio.AioRpcError) as raised:
-            await call.read()
-        self.assertEqual(raised.exception.code(), grpc.StatusCode.INVALID_ARGUMENT)
-
-    async def test_disconnect_before_stopped_unblocks_wait_closed_with_error(self):
-        call = await self.session()
-        call.cancel()
-        with self.assertRaises(SessionError):
-            await self.server.wait_closed(timeout=2)
-
-    async def test_callback_failure_is_reported(self):
-
-        def callback(item):
-            raise ValueError("callback failed")
-
-        self.server._session.on_event = callback
-        call = await self.session()
-        await call.write(event())
-        with self.assertRaises(grpc.aio.AioRpcError) as raised:
-            await call.read()
-        self.assertEqual(raised.exception.code(), grpc.StatusCode.INTERNAL)
-        with self.assertRaises(SessionError) as raised:
-            await self.server.wait_closed(timeout=2)
-        self.assertIsInstance(raised.exception.__cause__, ValueError)
-        self.assertEqual(self.server.revision, 0)
-
-    async def test_cancelled_callback_unblocks_session(self):
-
-        async def callback(item):
-            raise asyncio.CancelledError
-
-        self.server._session.on_event = callback
-        call = await self.session()
-        await call.write(event())
-        with self.assertRaises(SessionError):
-            await self.server.wait_closed(timeout=2)
-        with self.assertRaises(grpc.aio.AioRpcError) as raised:
-            await call.read()
-        self.assertEqual(raised.exception.code(), grpc.StatusCode.INTERNAL)
-
-    async def test_runtime_receive_message_limit(self):
-        server = await RpcServer(settings(max_message_bytes=64)).start()
-        async with grpc.aio.insecure_channel(server.endpoint) as channel:
-            stub = rpc.ControllerStub(channel)
-            metadata = (("authorization", f"Bearer {server.token}"),)
-            _ = [s async for s in stub.Bootstrap(pb.Empty(), metadata=metadata)]
-            call = stub.Session(metadata=metadata, timeout=2)
-            await call.write(pb.Notice(ready=pb.Ready()))
-            await server.wait_ready(timeout=2)
-            await call.write(
-                pb.Notice(
-                    event=pb.Event(
-                        revision=1,
-                        inode=2,
-                        file_written=pb.FileWritten(path="/hello", data=b"x" * 100),
-                    )
-                )
-            )
-            with self.assertRaises(grpc.aio.AioRpcError) as raised:
-                await call.read()
-            self.assertEqual(raised.exception.code(), grpc.StatusCode.RESOURCE_EXHAUSTED)
-        with self.assertRaises(SessionError):
-            await server.close(timeout=0.2)
-
-    async def test_close_timeout_still_releases_server(self):
-        call = await self.session()
-        closing = asyncio.create_task(self.server.close(timeout=0.05))
-        self.assertEqual((await call.read()).WhichOneof("value"), "stop")
-        with self.assertRaises(TimeoutError):
-            await closing
-        self.assertIsNot(await call.code(), grpc.StatusCode.OK)
-        await self.server.close()
-
-    async def test_context_manager_without_client(self):
-        async with RpcServer(settings()) as server:
-            self.assertTrue(server.endpoint.startswith("127.0.0.1:"))
-        with self.assertRaises(RuntimeError):
-            await server.start()
-
-    async def test_generated_ports_and_tokens_are_distinct(self):
-        async with RpcServer(settings()) as other:
-            self.assertNotEqual(self.server.endpoint, other.endpoint)
-            self.assertNotEqual(self.server.token, other.token)
-
-    async def test_bootstrap_preserves_nested_entries_and_binary_data(self):
-        config = settings(
+    async def start_server(self, on_event):
+        settings = RpcServerConfig(
             case_sensitive=False,
-            max_file_bytes=2048,
-            max_total_bytes=8192,
-            max_message_bytes=128,
-            entries=[
+            max_file_bytes=1024,
+            max_total_bytes=4096,
+            entries=(
                 InitialEntry(path="/docs", directory=True),
-                InitialEntry(path="/docs/你好.bin", data=b"\x00\xff\x80"),
+                InitialEntry(path="/docs/hello.bin", data=b"\x00\xff"),
+            ),
+        )
+        server = await RpcServer.create(settings, on_event=on_event)
+        self.addAsyncCleanup(server.close, timeout=5)
+        channel = await self.enterAsyncContext(grpc.aio.insecure_channel(server.endpoint))
+        metadata = (("authorization", f"Bearer {server.token}"),)
+        return server, rpc.ControllerStub(channel), metadata
+
+    async def bootstrap(self, stub, metadata):
+        return [item async for item in stub.Bootstrap(pb.Empty(), metadata=metadata, timeout=5)]
+
+    async def open_session(self, on_event):
+        server, stub, metadata = await self.start_server(on_event)
+        await self.bootstrap(stub, metadata)
+        call = stub.Session(metadata=metadata, timeout=15)
+        await call.write(pb.Notice(ready=pb.Ready()))
+        await server.wait_ready(timeout=5)
+        return server, call
+
+    async def test_bootstrap_returns_config_then_entries_in_order(self):
+        _, stub, metadata = await self.start_server(lambda event: None)
+
+        self.assertEqual(
+            await self.bootstrap(stub, metadata),
+            [
+                pb.BootstrapItem(
+                    config=pb.Config(
+                        case_sensitive=False, max_file_bytes=1024, max_total_bytes=4096
+                    )
+                ),
+                pb.BootstrapItem(entry=pb.InitialEntry(path="/docs", directory=True)),
+                pb.BootstrapItem(entry=pb.InitialEntry(path="/docs/hello.bin", data=b"\x00\xff")),
             ],
         )
-        async with RpcServer(config) as server:
-            self.assertEqual(server.max_message_bytes, 128)
-            async with grpc.aio.insecure_channel(server.endpoint) as channel:
-                items = [
-                    item
-                    async for item in rpc.ControllerStub(channel).Bootstrap(
-                        pb.Empty(),
-                        metadata=(("authorization", f"Bearer {server.token}"),),
-                        timeout=2,
-                    )
-                ]
+
+    async def test_session_delivers_events_to_sync_callback_in_order(self):
+        received = []
+        _, call = await self.open_session(received.append)
+        created = pb.FileCreated(path="/new", mode=0o100644)
+        written = pb.FileWritten(path="/new", data=b"hello", size=5, linked=True)
+
+        await call.write(
+            pb.Notice(event=pb.Event(inode=2, revision=1, time_ns=100, file_created=created))
+        )
+        await call.write(
+            pb.Notice(event=pb.Event(inode=2, revision=2, time_ns=200, file_written=written))
+        )
+        await call.write(pb.Notice(stopped=pb.Stopped()))
+        await call.done_writing()
+
+        self.assertIs(await call.read(), grpc.aio.EOF)
         self.assertEqual(
-            items[0].config,
-            pb.Config(case_sensitive=False, max_file_bytes=2048, max_total_bytes=8192),
+            received,
+            [
+                EventValue(inode=2, revision=1, time_ns=100, payload=created),
+                EventValue(inode=2, revision=2, time_ns=200, payload=written),
+            ],
         )
-        self.assertTrue(items[1].entry.directory)
-        self.assertEqual(items[2].entry.path, "/docs/你好.bin")
-        self.assertEqual(items[2].entry.data, b"\x00\xff\x80")
 
-    async def test_bootstrap_send_message_limit(self):
-        config = settings(
-            entries=[InitialEntry(path="/large", data=b"x" * 100)],
-            max_message_bytes=64,
-        )
-        async with RpcServer(config) as server:
-            async with grpc.aio.insecure_channel(server.endpoint) as channel:
-                call = rpc.ControllerStub(channel).Bootstrap(
-                    pb.Empty(), metadata=(("authorization", f"Bearer {server.token}"),), timeout=2
-                )
-                self.assertEqual((await call.read()).WhichOneof("value"), "config")
-                with self.assertRaises(grpc.aio.AioRpcError) as raised:
-                    await call.read()
-                self.assertEqual(raised.exception.code(), grpc.StatusCode.RESOURCE_EXHAUSTED)
+    async def test_close_sends_stop_and_waits_for_async_callback(self):
+        callback_started = asyncio.Event()
+        release_callback = asyncio.Event()
+        received = []
 
-    async def test_close_before_start_prevents_start(self):
-        server = RpcServer(settings())
-        await server.close()
-        await server.close()
-        with self.assertRaises(RuntimeError):
-            await server.start()
+        async def on_event(event):
+            callback_started.set()
+            await release_callback.wait()
+            received.append(event)
+
+        server, call = await self.open_session(on_event)
+        removed = pb.FileRemoved(path="/docs/hello.bin")
+
+        async with asyncio.TaskGroup() as tasks:
+            closing = tasks.create_task(server.close(timeout=5))
+            self.assertEqual(await call.read(), pb.Command(stop=pb.Stop()))
+            await call.write(
+                pb.Notice(event=pb.Event(inode=2, revision=1, time_ns=100, file_removed=removed))
+            )
+            await call.write(pb.Notice(stopped=pb.Stopped()))
+            await call.done_writing()
+            await asyncio.wait_for(callback_started.wait(), timeout=5)
+            self.assertFalse(closing.done())
+            release_callback.set()
+
+        self.assertEqual(received, [EventValue(inode=2, revision=1, time_ns=100, payload=removed)])

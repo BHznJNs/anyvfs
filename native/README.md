@@ -2,7 +2,7 @@
 
 Go 程序负责内存中的目录树、文件内容、inode、句柄、容量限制与 WinFsp/FUSE 挂载。外部应用通过操作系统访问挂载点，Go 处理这些文件请求，并把已提交的变更通过 gRPC 上报给控制进程。
 
-入口为 [`main.go`](main.go)，Go 模块名为 `anyvfs/native`，`go.mod` 要求 Go 1.23.0。控制通信的接口、鉴权、消息和生命周期见 [RPC 文档](../docs/rpc.md)。
+控制通信的接口、鉴权、消息和生命周期见 [RPC 文档](../docs/rpc.md)。
 
 ## 构建
 
