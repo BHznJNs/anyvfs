@@ -1,4 +1,10 @@
 from .rpc import RpcServer
-from .config import RpcServerConfig
+from .controller import EventHandler
+from .config import InitialEntry, RpcServerConfig
 
-__all__ = ["RpcServer", "RpcServerConfig"]
+__all__ = [
+    "RpcServer",
+    "EventHandler",
+    "InitialEntry",
+    "RpcServerConfig",
+]

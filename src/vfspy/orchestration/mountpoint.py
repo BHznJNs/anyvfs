@@ -19,7 +19,7 @@ def _is_reserved_windows_name(name: str) -> bool:
         or PureWindowsPath(name).is_reserved()
     )
 
-class MountPoint:
+class Mountpoint:
     def __init__(self, path: str | os.PathLike[str]):
         self._path = Path(path)
         self._validate(self._path)

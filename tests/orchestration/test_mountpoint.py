@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vfspy.orchestration.mountpoint import MountPoint
+from vfspy.orchestration.mountpoint import Mountpoint
 
 
 class MountPointValidationTests(unittest.TestCase):
@@ -15,32 +15,32 @@ class MountPointValidationTests(unittest.TestCase):
     def test_accepts_absolute_string_and_path_without_creating_directory(self):
         for value in (str(self.path), self.path):
             with self.subTest(value=value):
-                MountPoint(value)
+                Mountpoint(value)
                 self.assertFalse(self.path.exists())
 
     def test_rejects_relative_paths(self):
         for value in ("", ".", "mount", "parent/mount"):
             with self.subTest(value=value), self.assertRaises(ValueError):
-                MountPoint(value)
+                Mountpoint(value)
 
     def test_rejects_nul_character(self):
         with self.assertRaises(ValueError):
-            MountPoint(str(self.path) + "\x00")
+            Mountpoint(str(self.path) + "\x00")
 
     def test_rejects_missing_parent(self):
         with self.assertRaises(ValueError):
-            MountPoint(self.path / "child")
+            Mountpoint(self.path / "child")
 
     def test_rejects_parent_that_is_a_file(self):
         self.path.touch()
         with self.assertRaises(ValueError):
-            MountPoint(self.path / "child")
+            Mountpoint(self.path / "child")
 
     def test_accepts_normal_directory_names(self):
         for name in ("mount", "mount point", ".hidden", "mount.txt", "COM10", "console", "挂载点"):
             with self.subTest(name=name):
                 path = self.path.with_name(name)
-                MountPoint(path)
+                Mountpoint(path)
                 self.assertFalse(path.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows filename rules")
@@ -65,13 +65,13 @@ class MountPointValidationTests(unittest.TestCase):
             "bad\x1fname",
         ):
             with self.subTest(name=name), self.assertRaises(ValueError):
-                MountPoint(self.path.with_name(name))
+                Mountpoint(self.path.with_name(name))
 
     @unittest.skipIf(os.name == "nt", "POSIX filename rules")
     def test_non_windows_does_not_apply_windows_name_restrictions(self):
         for name in ("CON", "nul.txt", "COM1", "mount.", "mount ", "mount?name", "mount:name"):
             with self.subTest(name=name):
-                MountPoint(self.path.with_name(name))
+                Mountpoint(self.path.with_name(name))
 
 
 class MountPointLifecycleTests(unittest.IsolatedAsyncioTestCase):
@@ -79,7 +79,7 @@ class MountPointLifecycleTests(unittest.IsolatedAsyncioTestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.path = Path(folder.name) / "mount"
-        self.mount = MountPoint(self.path)
+        self.mount = Mountpoint(self.path)
 
     @unittest.skipUnless(os.name == "nt", "WinFsp mountpoint lifecycle")
     async def test_windows_prepare_leaves_directory_creation_to_winfsp(self):
