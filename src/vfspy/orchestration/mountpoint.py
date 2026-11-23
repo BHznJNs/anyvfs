@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import ntpath
 import os
 import sys
@@ -39,6 +37,10 @@ class Mountpoint:
 
         if not path.parent.is_dir():
             raise ValueError("mountpoint parent must be a existing directory")
+
+    @property
+    def path(self) -> Path:
+        return self._path
 
     async def prepare(self):
         """

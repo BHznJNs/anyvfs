@@ -1,5 +1,6 @@
 from pydantic import Field, StrictBool
 
+from ..utils.field import PositiveTimeout
 from ..utils.model import FrozenModel
 
 
@@ -21,3 +22,5 @@ class RpcServerConfig(FrozenModel):
         description="Maximum encoded gRPC message size in bytes, for both sends and receives.",
     )
     entries: tuple[InitialEntry, ...] = ()
+    startup_timeout: PositiveTimeout | None = None
+    stop_timeout: PositiveTimeout | None = None

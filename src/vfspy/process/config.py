@@ -1,13 +1,12 @@
 import math
 import os
 from pathlib import Path
-from typing import Annotated
 
 from pydantic import Field
 
+from ..utils.field import PositiveTimeout
 from ..utils.model import FrozenModel
 
-PositiveTimeout = Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)]
 _MAX_GO_DURATION_MILLISECONDS = ((1 << 63) - 1) // 1_000_000
 
 # Loopback endpoint with a decimal port in 1..65535 (leading zeroes allowed).
@@ -26,11 +25,9 @@ class BridgeProcessConfig(FrozenModel):
     startup_timeout: PositiveTimeout = Field(
         default=25.0,
         lt=_MAX_GO_DURATION_MILLISECONDS / 1_000,
-        description=(
-            "Bootstrap deadline in seconds, rounded up to milliseconds within Go's duration range."
-        ),
+        description="Bootstrap deadline in seconds, rounded up to milliseconds within Go's duration range.",
     )
-    stop_timeout: PositiveTimeout = 5.0
+    stop_timeout: PositiveTimeout | None = None
 
     def to_arguments(self) -> tuple[str, ...]:
         return (

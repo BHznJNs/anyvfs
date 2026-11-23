@@ -5,8 +5,6 @@ asyncio event loop. For editable installs, set ``BridgeProcessConfig.executable`
 to the built bridge binary.
 """
 
-from __future__ import annotations
-
 import asyncio
 import os
 import subprocess

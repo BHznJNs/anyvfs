@@ -15,12 +15,16 @@ class RpcServer:
                  *,
                  token: str,
                  port: int,
+                 startup_timeout: float | None = None,
+                 stop_timeout: float | None = None,
                  on_event: EventHandler):
         self._server = server
         self._controller = controller
         self._on_event = on_event
         self._token = token
         self._endpoint = f"127.0.0.1:{port}"
+        self._startup_timeout = startup_timeout
+        self._stop_timeout = stop_timeout
         self._closed = False
 
     @staticmethod
@@ -49,7 +53,13 @@ class RpcServer:
             await server.stop(None)
             raise
 
-        return cls(server, rpc_controller, token=token, port=port, on_event=on_event)
+        return cls(server,
+                   rpc_controller,
+                   token=token,
+                   port=port,
+                   startup_timeout=settings.startup_timeout,
+                   stop_timeout=settings.stop_timeout,
+                   on_event=on_event)
 
     @property
     def token(self) -> str:
@@ -59,14 +69,14 @@ class RpcServer:
     def endpoint(self) -> str:
         return self._endpoint
 
-    async def wait_ready(self, timeout: float | None = None):
+    async def wait_ready(self):
         if self._closed: raise RuntimeError("server already closed")
-        await self._controller.wait_ready(timeout)
+        await self._controller.wait_ready(self._startup_timeout)
 
-    async def close(self, timeout: float | None = None):
+    async def close(self):
         if self._closed: return
         self._closed = True
         try:
-            await self._controller.stop(timeout)
+            await self._controller.stop(self._stop_timeout)
         finally:
             await self._server.stop(None)
