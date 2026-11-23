@@ -3,7 +3,7 @@ import unittest
 
 import grpc
 
-from vfspy import EventValue, InitialEntry
+from vfspy import EventValue, InitialDirectory, InitialFile
 from vfspy._rpc import session_pb2 as pb
 from vfspy._rpc import session_pb2_grpc as rpc
 from vfspy.server import RpcServer, RpcServerConfig
@@ -16,8 +16,8 @@ class RpcServerTests(unittest.IsolatedAsyncioTestCase):
             max_file_bytes=1024,
             max_total_bytes=4096,
             entries=(
-                InitialEntry(path="/docs", directory=True),
-                InitialEntry(path="/docs/hello.bin", data=b"\x00\xff"),
+                InitialFile(path="/docs/hello.bin", data=b"\x00\xff"),
+                InitialDirectory(path="/inbox"),
             ),
             startup_timeout=5,
             stop_timeout=5,
@@ -50,8 +50,8 @@ class RpcServerTests(unittest.IsolatedAsyncioTestCase):
                         case_sensitive=False, max_file_bytes=1024, max_total_bytes=4096
                     )
                 ),
-                pb.BootstrapItem(entry=pb.InitialEntry(path="/docs", directory=True)),
-                pb.BootstrapItem(entry=pb.InitialEntry(path="/docs/hello.bin", data=b"\x00\xff")),
+                pb.BootstrapItem(file=pb.InitialFile(path="/docs/hello.bin", data=b"\x00\xff")),
+                pb.BootstrapItem(directory=pb.InitialDirectory(path="/inbox")),
             ],
         )
 

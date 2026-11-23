@@ -5,7 +5,7 @@ import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from vfspy import EventValue, InitialEntry, Mountpoint, VirtualFileSystem
+from vfspy import EventValue, InitialDirectory, InitialFile, Mountpoint, VirtualFileSystem
 
 
 def print_event(event: EventValue) -> None:
@@ -17,12 +17,15 @@ async def main(executable: Path | None) -> None:
         mountpoint = Mountpoint(Path(directory) / "mount")
         filesystem = await VirtualFileSystem.create(
             mountpoint,
-            entries=[InitialEntry(path="/hello.txt", data=b"Hello from vfspy!\n")],
+            entries=[
+                InitialFile(path="/docs/hello.txt", data=b"Hello from vfspy!\n"),
+                InitialDirectory(path="/inbox"),
+            ],
             on_event=print_event,
             executable=executable,
         )
         try:
-            hello = mountpoint.path / "hello.txt"
+            hello = mountpoint.path / "docs" / "hello.txt"
             original = await asyncio.to_thread(hello.read_text, encoding="utf-8")
             print(f"Read: {original.rstrip()}", flush=True)
 

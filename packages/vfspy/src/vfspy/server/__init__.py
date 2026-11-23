@@ -1,4 +1,4 @@
-from .config import InitialEntry, RpcServerConfig
+from .config import InitialDirectory, InitialFile, RpcServerConfig
 from .controller import EventHandler
 from .errors import ProtocolError, SessionError
 from .events import EventPayload, EventValue
@@ -8,7 +8,8 @@ __all__ = [
     "EventHandler",
     "EventPayload",
     "EventValue",
-    "InitialEntry",
+    "InitialDirectory",
+    "InitialFile",
     "ProtocolError",
     "RpcServer",
     "RpcServerConfig",

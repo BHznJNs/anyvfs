@@ -96,16 +96,8 @@ class RpcController(rpc.ControllerServicer):
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Bootstrap already consumed")
         self._bootstrapped = True
 
-        settings = self._settings
-        yield pb.BootstrapItem(
-            config=pb.Config(
-                case_sensitive=settings.case_sensitive,
-                max_file_bytes=settings.max_file_bytes,
-                max_total_bytes=settings.max_total_bytes,
-            )
-        )
-        for entry in settings.entries:
-            yield pb.BootstrapItem(entry=pb.InitialEntry(**entry.model_dump()))
+        for item in self._settings.iter_bootstrap_items():
+            yield item
 
     async def Session(  # noqa: N802
         self, request_iterator: AsyncIterator[pb.Notice], context: grpc.aio.ServicerContext

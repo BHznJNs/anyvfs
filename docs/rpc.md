@@ -21,12 +21,12 @@ Go 发送 `Empty {}`，使用 `--startup-timeout` 指定 deadline，覆盖 Boots
 
 ```text
 BootstrapItem(config=Config(...))
-BootstrapItem(entry=InitialEntry(path="/docs", directory=true))
-BootstrapItem(entry=InitialEntry(path="/docs/guide.txt", data=<bytes>))
+BootstrapItem(file=InitialFile(path="/docs/guide.txt", data=<bytes>))
+BootstrapItem(directory=InitialDirectory(path="/inbox"))
 ... EOF（正常结束 Bootstrap 响应流）
 ```
 
-第一条必须选择 `config`，后续每条必须选择 `entry`；允许只有配置、没有初始文件。根目录由 Go 创建。父目录必须已存在；同一路径不能重复，大小写不敏感模式也不能有折叠后重名。导入不会产生 Event。流错误或无效配置/条目会导致 Go 启动失败。
+第一条必须选择 `config`，后续每条选择 `file` 或 `directory`。只发配置也有效。Go 创建根目录和缺失的父目录，因此文件可以先于其父目录出现。`directory` 可用于预建空目录，也可以显式声明从其他路径推断出的父目录。同一路径只能声明一次，文件与目录之间的路径冲突会导致启动失败。在大小写不敏感模式下，这些规则按折叠后的路径比较。显式目录采用声明中的拼写，仅自动创建的目录采用首次出现时的拼写。导入不会产生 Event。流错误或无效配置、文件或目录会导致 Go 启动失败。
 
 ### 初始化消息（字段名 / protobuf 类型 / 字段号）
 
@@ -36,15 +36,16 @@ BootstrapItem(entry=InitialEntry(path="/docs/guide.txt", data=<bytes>))
 | `Config` | `case_sensitive: bool = 1` | true 按原名比较，false 使用 Go `strings.ToLower` 作为查找键，同时配置挂载宿主的大小写能力。 |
 | `Config` | `max_file_bytes: int64 = 2` | 单个文件内容字节上限，必须大于 0、至多 1 GiB（`2^30`）。 |
 | `Config` | `max_total_bytes: int64 = 3` | 全部文件内容的字节预算，必须不小于单文件上限、至多 1 TiB（`2^40`）。不是整个进程内存的硬上限。 |
-| `InitialEntry` | `path: string = 1` | 挂载根内的绝对路径，例如 `/hello.txt`；使用 `/`，不是宿主机路径或盘符。 |
-| `InitialEntry` | `directory: bool = 2` | true 为目录，false 为普通文件。 |
-| `InitialEntry` | `data: bytes = 3` | 普通文件的初始完整二进制内容；目录必须为空。不做文本编码转换。 |
+| `InitialFile` | `path: string = 1` | 挂载根内的绝对文件路径，例如 `/docs/guide.txt`。 |
+| `InitialFile` | `data: bytes = 2` | 文件的完整二进制内容，可为空。内容按原始字节复制。 |
+| `InitialDirectory` | `path: string = 1` | 挂载根内的绝对目录路径，例如 `/inbox`。 |
 | `BootstrapItem` | `config: Config = 1` | `oneof value` 的配置分支，只出现在第一条。 |
-| `BootstrapItem` | `entry: InitialEntry = 2` | `oneof value` 的条目分支，出现在配置之后。 |
+| `BootstrapItem` | `file: InitialFile = 2` | `oneof value` 的文件分支，出现在配置之后。 |
+| `BootstrapItem` | `directory: InitialDirectory = 3` | `oneof value` 的目录分支，出现在配置之后。 |
 
-路径组件不能为空、`.` 或 `..`，组件长度至多 255 字节，禁止反斜杠、冒号、NUL、`< > " | ? *`，禁止以点或空格结尾。使用规范路径，禁止重复 `/`、尾随 `/`；`/` 是已存在的根目录，不能作为新条目。初始文件 mode 为 `S_IFREG | 0644`，目录为 `S_IFDIR | 0755`，没有初始 mode/uid/gid/时间字段。
+使用挂载根内以 `/` 开头的规范路径。路径组件不能为空、`.` 或 `..`，组件长度至多 255 字节，禁止反斜杠、冒号、NUL、`< > " | ? *`，禁止以点或空格结尾。禁止重复 `/` 和尾随 `/`。`/` 是已存在的根目录，不能作为新条目。初始文件 mode 为 `S_IFREG | 0644`，目录为 `S_IFDIR | 0755`，没有初始 mode/uid/gid/时间字段。
 
-每个文件内容必须放在一条 `InitialEntry` 中，协议没有初始数据分块接口。客户端和服务端的单消息大小限制必须容纳整个条目及编码开销；`max_file_bytes` 不会自动调整 `--max-message-bytes`。运行中删除但仍被打开的文件，其内容直到最后一个句柄释放才从容量预算中扣除；事件队列等额外开销不在这个预算内。
+每个文件的完整内容放在一条 `InitialFile` 中。客户端和服务端的单消息大小限制必须容纳整个条目及编码开销，`max_file_bytes` 不会自动调整 `--max-message-bytes`。运行中删除但仍被打开的文件，其内容直到最后一个句柄释放才从容量预算中扣除。事件队列等额外开销在这个预算之外。
 
 ## 2. Session
 

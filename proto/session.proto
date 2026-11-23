@@ -13,8 +13,15 @@ message Config {
   int64 max_file_bytes = 2;
   int64 max_total_bytes = 3;
 }
-message InitialEntry { string path = 1; bool directory = 2; bytes data = 3; }
-message BootstrapItem { oneof value { Config config = 1; InitialEntry entry = 2; } }
+message InitialFile { string path = 1; bytes data = 2; }
+message InitialDirectory { string path = 1; }
+message BootstrapItem {
+  oneof value {
+    Config config = 1;
+    InitialFile file = 2;
+    InitialDirectory directory = 3;
+  }
+}
 message Ready {}
 message Stopped {}
 message Stop {}

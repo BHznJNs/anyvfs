@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Self
 
 from ..process import BridgeProcess, BridgeProcessConfig
-from ..server import EventHandler, InitialEntry, RpcServer, RpcServerConfig
+from ..server import EventHandler, InitialDirectory, InitialFile, RpcServer, RpcServerConfig
 from .mountpoint import Mountpoint
 
 __all__ = ["Mountpoint", "VirtualFileSystem"]
@@ -24,7 +24,7 @@ class VirtualFileSystem:
                      mountpoint: Mountpoint,
                      *,
                      on_event: EventHandler,
-                     entries: Iterable[InitialEntry] | None = None,
+                     entries: Iterable[InitialFile | InitialDirectory] | None = None,
                      max_file_bytes: int = 64 << 20,      # 64 MiB
                      max_total_bytes: int = 512 << 20,    # 512 MiB
                      case_sensitive: bool = True,

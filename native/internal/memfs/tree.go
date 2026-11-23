@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/winfsp/cgofuse/fuse"
 	"anyvfs/native/internal/queue"
 	pb "anyvfs/native/internal/rpc"
+	"github.com/winfsp/cgofuse/fuse"
 )
 
 type node struct {
@@ -58,7 +58,7 @@ type FS struct {
 	OnInit                          func()
 }
 
-func New(config *pb.Config, entries []*pb.InitialEntry, notices *queue.Queue[*pb.Notice]) (*FS, error) {
+func New(config *pb.Config, entries []*pb.BootstrapItem, notices *queue.Queue[*pb.Notice]) (*FS, error) {
 	if config == nil || config.MaxFileBytes <= 0 || config.MaxTotalBytes <= 0 ||
 		config.MaxFileBytes > config.MaxTotalBytes || config.MaxFileBytes > 1<<30 || config.MaxTotalBytes > 1<<40 {
 		return nil, fmt.Errorf("invalid memory limits (require 0 < file <= total, file <= 1 GiB, total <= 1 TiB)")
@@ -68,10 +68,8 @@ func New(config *pb.Config, entries []*pb.InitialEntry, notices *queue.Queue[*pb
 	}
 	f := &FS{config: config, handles: make(map[uint64]*handle), notices: notices}
 	f.root = f.makeNode(nil, "", fuse.S_IFDIR|0755)
-	for _, entry := range entries {
-		if err := f.AddInitialEntry(entry); err != nil {
-			return nil, err
-		}
+	if err := f.importInitialEntries(entries); err != nil {
+		return nil, err
 	}
 	return f, nil
 }
@@ -211,36 +209,4 @@ func (f *FS) Init() {
 	if f.OnInit != nil {
 		f.OnInit()
 	}
-}
-
-// AddInitialEntry is only used before mounting; it deliberately emits no mutation events.
-func (f *FS) AddInitialEntry(e *pb.InitialEntry) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if e == nil {
-		return fmt.Errorf("nil initial entry")
-	}
-	if _, c := f.lookup(e.Path); c == 0 {
-		return fmt.Errorf("duplicate initial path: %s", e.Path)
-	}
-	parent, name, c := f.parent(e.Path)
-	if c != 0 {
-		return fmt.Errorf("invalid initial entry parent: %s (%d)", e.Path, c)
-	}
-	mode := uint32(fuse.S_IFREG | 0644)
-	if e.Directory {
-		mode = fuse.S_IFDIR | 0755
-	}
-	n := f.makeNode(parent, name, mode)
-	if e.Directory && len(e.Data) > 0 {
-		return fmt.Errorf("directory has data")
-	}
-	if !e.Directory {
-		if c = f.resize(n, int64(len(e.Data))); c != 0 {
-			return fmt.Errorf("initial entry exceeds memory limits: %d", c)
-		}
-		copy(n.data, e.Data)
-	}
-	f.attach(parent, n)
-	return nil
 }

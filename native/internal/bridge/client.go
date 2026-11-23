@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -34,7 +35,7 @@ func newControllerClient(input programInput) (*controllerClient, error) {
 	}, nil
 }
 
-func (c *controllerClient) Startup(ctx context.Context) (*pb.Config, []*pb.InitialEntry, error) {
+func (c *controllerClient) Startup(ctx context.Context) (*pb.Config, []*pb.BootstrapItem, error) {
 	startup, cancel := context.WithTimeout(ctx, c.startupTimeout)
 	defer cancel()
 	startup = metadata.AppendToOutgoingContext(startup, "authorization", "Bearer "+c.token)
@@ -47,7 +48,10 @@ func (c *controllerClient) Startup(ctx context.Context) (*pb.Config, []*pb.Initi
 		return nil, nil, err
 	}
 	config := first.GetConfig()
-	var entries []*pb.InitialEntry
+	if config == nil {
+		return nil, nil, fmt.Errorf("first bootstrap item must be config")
+	}
+	var entries []*pb.BootstrapItem
 	for {
 		item, err := bootstrap.Recv()
 		if err == io.EOF {
@@ -56,7 +60,7 @@ func (c *controllerClient) Startup(ctx context.Context) (*pb.Config, []*pb.Initi
 		if err != nil {
 			return nil, nil, err
 		}
-		entries = append(entries, item.GetEntry())
+		entries = append(entries, item)
 	}
 }
 

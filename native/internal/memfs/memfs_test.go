@@ -7,24 +7,91 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/winfsp/cgofuse/fuse"
 	"anyvfs/native/internal/queue"
 	pb "anyvfs/native/internal/rpc"
+	"github.com/winfsp/cgofuse/fuse"
 )
 
-func newFS(t *testing.T, sensitive bool, file, total int64) (*FS, *queue.Queue[*pb.Notice]) {
+func newFS(t *testing.T, sensitive bool, file, total int64, entries ...*pb.BootstrapItem) (*FS, *queue.Queue[*pb.Notice]) {
 	t.Helper()
 	notices := queue.New[*pb.Notice]()
-	f, err := New(&pb.Config{CaseSensitive: sensitive, MaxFileBytes: file, MaxTotalBytes: total}, nil, notices)
+	f, err := New(&pb.Config{CaseSensitive: sensitive, MaxFileBytes: file, MaxTotalBytes: total}, entries, notices)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return f, notices
 }
-func addInitialEntry(t *testing.T, f *FS, p string, data []byte, dir bool) {
-	t.Helper()
-	if err := f.AddInitialEntry(&pb.InitialEntry{Path: p, Data: data, Directory: dir}); err != nil {
-		t.Fatal(err)
+func bootstrapFile(p, data string) *pb.BootstrapItem {
+	return &pb.BootstrapItem{Value: &pb.BootstrapItem_File{
+		File: &pb.InitialFile{Path: p, Data: []byte(data)},
+	}}
+}
+func bootstrapDirectory(p string) *pb.BootstrapItem {
+	return &pb.BootstrapItem{Value: &pb.BootstrapItem_Directory{
+		Directory: &pb.InitialDirectory{Path: p},
+	}}
+}
+func TestBootstrapImportsFilesAndDirectories(t *testing.T) {
+	f, out := newFS(t, false, 64, 64,
+		bootstrapFile("/docs/guides/a.bin", "\x00\xff"),
+		bootstrapFile("/DOCS/empty.txt", ""),
+		bootstrapDirectory("/inbox/pending"),
+		bootstrapDirectory("/Docs"),
+	)
+	c, h := f.Open("/docs/guides/a.bin", fuse.O_RDONLY)
+	mustCode(t, c, 0)
+	if string(read(t, f, h)) != "\x00\xff" || f.used != 2 {
+		t.Fatal("bootstrap content or quota usage is incorrect")
+	}
+	n, c := f.lookup("/docs/guides/a.bin")
+	mustCode(t, c, 0)
+	if got := n.location(); got != "/Docs/guides/a.bin" {
+		t.Fatalf("got path %q, want explicit directory spelling", got)
+	}
+	n, c = f.lookup("/Docs/empty.txt")
+	mustCode(t, c, 0)
+	if n.dir() || len(n.data) != 0 {
+		t.Fatal("expected a zero-byte file")
+	}
+	n, c = f.lookup("/inbox/pending")
+	mustCode(t, c, 0)
+	if !n.dir() || len(n.children) != 0 {
+		t.Fatal("expected an empty directory")
+	}
+	if len(drainNotices(t, out)) != 0 {
+		t.Fatal("bootstrap emitted a mutation notice")
+	}
+}
+
+func TestBootstrapRejectsInvalidEntries(t *testing.T) {
+	config := &pb.Config{MaxFileBytes: 2, MaxTotalBytes: 3}
+	file := bootstrapFile("/Docs", "ab")
+	nested := bootstrapFile("/docs/guide", "cd")
+	directory := bootstrapDirectory("/docs")
+	for _, tt := range []struct {
+		name    string
+		entries []*pb.BootstrapItem
+	}{
+		{"duplicate file", []*pb.BootstrapItem{file, bootstrapFile("/docs", "")}},
+		{"duplicate directory", []*pb.BootstrapItem{nested, directory, bootstrapDirectory("/DOCS")}},
+		{"file then explicit directory", []*pb.BootstrapItem{file, directory}},
+		{"explicit directory then file", []*pb.BootstrapItem{directory, file}},
+		{"file then child", []*pb.BootstrapItem{file, nested}},
+		{"child then file", []*pb.BootstrapItem{nested, file}},
+		{"trailing slash", []*pb.BootstrapItem{bootstrapFile("/docs/file/", "")}},
+		{"repeated slash", []*pb.BootstrapItem{bootstrapFile("/docs//file", "")}},
+		{"dot component", []*pb.BootstrapItem{bootstrapDirectory("/docs/../file")}},
+		{"root", []*pb.BootstrapItem{bootstrapDirectory("/")}},
+		{"single file quota", []*pb.BootstrapItem{bootstrapFile("/large", "abc")}},
+		{"total quota", []*pb.BootstrapItem{file, bootstrapFile("/other", "cd")}},
+		{"missing branch", []*pb.BootstrapItem{{}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := New(config, tt.entries, queue.New[*pb.Notice]())
+			if f != nil || err == nil {
+				t.Fatal("expected bootstrap to fail")
+			}
+		})
 	}
 }
 func mustCode(t *testing.T, got, want int) {
@@ -62,9 +129,7 @@ func drainNotices(t *testing.T, out *queue.Queue[*pb.Notice]) []*pb.Notice {
 }
 
 func TestHandlesSurviveRenameReplacementAndUnlink(t *testing.T) {
-	f, out := newFS(t, true, 1024, 2048)
-	addInitialEntry(t, f, "/a", []byte("original"), false)
-	addInitialEntry(t, f, "/b", []byte("target"), false)
+	f, out := newFS(t, true, 1024, 2048, bootstrapFile("/a", "original"), bootstrapFile("/b", "target"))
 	c, a := f.Open("/a", fuse.O_RDWR)
 	mustCode(t, c, 0)
 	c, b := f.Open("/b", fuse.O_RDWR)
@@ -118,8 +183,7 @@ func TestSparseTruncateAppendAndEventCopy(t *testing.T) {
 	mustCode(t, f.Read("", make([]byte, 1), 0, a), -fuse.EBADF)
 }
 func TestQuotasCountUnlinkedOpenFilesAndFailedOperations(t *testing.T) {
-	f, _ := newFS(t, true, 8, 10)
-	addInitialEntry(t, f, "/a", []byte("12345678"), false)
+	f, _ := newFS(t, true, 8, 10, bootstrapFile("/a", "12345678"))
 	c, a := f.Open("/a", fuse.O_RDWR)
 	mustCode(t, c, 0)
 	mustCode(t, f.Unlink("/a"), 0)
@@ -137,9 +201,7 @@ func TestQuotasCountUnlinkedOpenFilesAndFailedOperations(t *testing.T) {
 	mustCode(t, f.Write("", []byte("123"), 0, b), 3)
 }
 func TestDirectoryRenameAndEnumerationSnapshot(t *testing.T) {
-	f, out := newFS(t, false, 64, 128)
-	addInitialEntry(t, f, "/Dir", nil, true)
-	addInitialEntry(t, f, "/Dir/a", []byte("a"), false)
+	f, out := newFS(t, false, 64, 128, bootstrapDirectory("/Dir"), bootstrapFile("/Dir/a", "a"))
 	c, h := f.Open("/dir/A", fuse.O_RDWR)
 	mustCode(t, c, 0)
 	c, d := f.Opendir("/Dir")
@@ -190,8 +252,7 @@ func TestConcurrentAppendAndEventOrdering(t *testing.T) {
 	}
 }
 func TestMetadataAndNoOpEvents(t *testing.T) {
-	f, out := newFS(t, true, 64, 64)
-	addInitialEntry(t, f, "/a", []byte("a"), false)
+	f, out := newFS(t, true, 64, 64, bootstrapFile("/a", "a"))
 	c, h := f.Open("/a", fuse.O_RDONLY)
 	mustCode(t, c, 0)
 	mustCode(t, f.Flush("", h), 0)
