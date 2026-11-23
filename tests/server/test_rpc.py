@@ -3,11 +3,10 @@ import unittest
 
 import grpc
 
+from vfspy import EventValue, InitialEntry
 from vfspy._rpc import session_pb2 as pb
 from vfspy._rpc import session_pb2_grpc as rpc
-from vfspy.server import RpcServer
-from vfspy.server.config import InitialEntry, RpcServerConfig
-from vfspy.server.events import EventValue
+from vfspy.server import RpcServer, RpcServerConfig
 
 
 class RpcServerTests(unittest.IsolatedAsyncioTestCase):
@@ -20,9 +19,11 @@ class RpcServerTests(unittest.IsolatedAsyncioTestCase):
                 InitialEntry(path="/docs", directory=True),
                 InitialEntry(path="/docs/hello.bin", data=b"\x00\xff"),
             ),
+            startup_timeout=5,
+            stop_timeout=5,
         )
         server = await RpcServer.create(settings, on_event=on_event)
-        self.addAsyncCleanup(server.close, timeout=5)
+        self.addAsyncCleanup(server.aclose)
         channel = await self.enterAsyncContext(grpc.aio.insecure_channel(server.endpoint))
         metadata = (("authorization", f"Bearer {server.token}"),)
         return server, rpc.ControllerStub(channel), metadata
@@ -35,7 +36,7 @@ class RpcServerTests(unittest.IsolatedAsyncioTestCase):
         await self.bootstrap(stub, metadata)
         call = stub.Session(metadata=metadata, timeout=15)
         await call.write(pb.Notice(ready=pb.Ready()))
-        await server.wait_ready(timeout=5)
+        await server.wait_ready()
         return server, call
 
     async def test_bootstrap_returns_config_then_entries_in_order(self):
@@ -92,7 +93,7 @@ class RpcServerTests(unittest.IsolatedAsyncioTestCase):
         removed = pb.FileRemoved(path="/docs/hello.bin")
 
         async with asyncio.TaskGroup() as tasks:
-            closing = tasks.create_task(server.close(timeout=5))
+            closing = tasks.create_task(server.aclose())
             self.assertEqual(await call.read(), pb.Command(stop=pb.Stop()))
             await call.write(
                 pb.Notice(event=pb.Event(inode=2, revision=1, time_ns=100, file_removed=removed))

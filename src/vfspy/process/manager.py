@@ -44,7 +44,7 @@ class BridgeProcess:
             )
         return self
 
-    async def close(self):
+    async def aclose(self):
         async with self._lifecycle_lock:
             if not self.is_running: return
             process = self._process
@@ -68,4 +68,4 @@ class BridgeProcess:
         return await self.start()
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.close()
+        await self.aclose()

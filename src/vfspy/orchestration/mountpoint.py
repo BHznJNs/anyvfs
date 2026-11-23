@@ -54,7 +54,7 @@ class Mountpoint:
             self._path.mkdir()
             self._created = self._path.lstat()
 
-    async def close(self):
+    async def aclose(self):
         if self._created is None: return
 
         # remove the created directory on Linux/macOS

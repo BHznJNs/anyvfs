@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vfspy.orchestration.mountpoint import Mountpoint
+from vfspy import Mountpoint
 
 
 class MountPointValidationTests(unittest.TestCase):
@@ -87,7 +87,7 @@ class MountPointLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.path.exists())
         # WinFsp owns the directory even if it appears after prepare().
         self.path.mkdir()
-        await self.mount.close()
+        await self.mount.aclose()
         self.assertTrue(self.path.is_dir())
 
     @unittest.skipUnless(os.name == "nt", "WinFsp mountpoint lifecycle")
@@ -100,7 +100,7 @@ class MountPointLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     self.path.touch()
                 with self.assertRaises(RuntimeError):
                     await self.mount.prepare()
-                await self.mount.close()
+                await self.mount.aclose()
                 self.assertTrue(self.path.exists())
                 if directory:
                     self.path.rmdir()
@@ -111,7 +111,7 @@ class MountPointLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_posix_prepare_creates_directory_and_close_removes_it(self):
         await self.mount.prepare()
         self.assertTrue(self.path.is_dir())
-        await self.mount.close()
+        await self.mount.aclose()
         self.assertFalse(self.path.exists())
 
     @unittest.skipIf(os.name == "nt", "FUSE mountpoint lifecycle")
@@ -124,7 +124,7 @@ class MountPointLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     self.path.touch()
                 with self.assertRaises(FileExistsError):
                     await self.mount.prepare()
-                await self.mount.close()
+                await self.mount.aclose()
                 self.assertTrue(self.path.exists())
                 if directory:
                     self.path.rmdir()
@@ -138,31 +138,31 @@ class MountPointLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await self.mount.prepare()
         self.path.parent.mkdir()
         self.path.mkdir()
-        await self.mount.close()
+        await self.mount.aclose()
         self.assertTrue(self.path.is_dir())
 
     async def test_close_before_prepare_preserves_existing_directory(self):
         self.path.mkdir()
-        await self.mount.close()
-        await self.mount.close()
+        await self.mount.aclose()
+        await self.mount.aclose()
         self.assertTrue(self.path.is_dir())
 
     @unittest.skipIf(os.name == "nt", "FUSE mountpoint lifecycle")
     async def test_repeated_close_preserves_new_directory_at_same_path(self):
         await self.mount.prepare()
-        await self.mount.close()
+        await self.mount.aclose()
         self.path.mkdir()
-        await self.mount.close()
+        await self.mount.aclose()
         self.assertTrue(self.path.is_dir())
 
     @unittest.skipIf(os.name == "nt", "FUSE mountpoint lifecycle")
     async def test_close_tolerates_directory_already_removed(self):
         await self.mount.prepare()
         self.path.rmdir()
-        await self.mount.close()
+        await self.mount.aclose()
         self.assertFalse(self.path.exists())
         self.path.mkdir()
-        await self.mount.close()
+        await self.mount.aclose()
         self.assertTrue(self.path.is_dir())
 
     @unittest.skipIf(os.name == "nt", "FUSE mountpoint lifecycle")
@@ -177,7 +177,7 @@ class MountPointLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     self.path.mkdir()
                 else:
                     self.path.touch()
-                await self.mount.close()
+                await self.mount.aclose()
                 self.assertTrue(self.path.exists())
                 self.assertEqual(self.path.is_dir(), directory)
                 self.assertTrue(original.is_dir())
@@ -187,7 +187,7 @@ class MountPointLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     self.path.unlink()
                 # Once close() has completed, the original directory is no longer owned.
                 original.rename(self.path)
-                await self.mount.close()
+                await self.mount.aclose()
                 self.assertTrue(self.path.is_dir())
                 self.path.rmdir()
 
@@ -197,7 +197,7 @@ class MountPointLifecycleTests(unittest.IsolatedAsyncioTestCase):
         original = self.path.with_name("original")
         self.path.rename(original)
         self.path.symlink_to(original, target_is_directory=True)
-        await self.mount.close()
+        await self.mount.aclose()
         self.assertTrue(self.path.is_symlink())
         self.assertEqual(self.path.resolve(), original)
         self.assertTrue(original.is_dir())
@@ -208,8 +208,8 @@ class MountPointLifecycleTests(unittest.IsolatedAsyncioTestCase):
         child = self.path / "data.txt"
         child.write_text("keep me", encoding="utf-8")
         with self.assertRaises(OSError):
-            await self.mount.close()
+            await self.mount.aclose()
         self.assertEqual(child.read_text(encoding="utf-8"), "keep me")
         child.unlink()
-        await self.mount.close()
+        await self.mount.aclose()
         self.assertFalse(self.path.exists())

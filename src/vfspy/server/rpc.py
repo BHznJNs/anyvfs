@@ -73,7 +73,7 @@ class RpcServer:
         if self._closed: raise RuntimeError("server already closed")
         await self._controller.wait_ready(self._startup_timeout)
 
-    async def close(self):
+    async def aclose(self):
         if self._closed: return
         self._closed = True
         try:

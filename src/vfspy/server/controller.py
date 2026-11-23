@@ -147,6 +147,6 @@ class RpcController(rpc.ControllerServicer):
         if session.stopped.is_set(): return
 
         self._session = None
-        await session.stop()
         async with asyncio.timeout(timeout):
+            await session.stop()
             await session.stopped.wait()

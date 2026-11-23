@@ -41,7 +41,7 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
         self.spawn_release.set()
         try:
             for process in self.processes:
-                await process.close()
+                await process.aclose()
         finally:
             self.spawn_patch.stop()
 
@@ -88,7 +88,7 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
         child = self.children[0]
         self.assertEqual(await asyncio.wait_for(child.wait(), 5), 7)
         with patch.object(child, "terminate") as terminate:
-            await process.close()
+            await process.aclose()
         terminate.assert_not_called()
         with self.assertRaises(RuntimeError):
             await process.start()
@@ -102,7 +102,7 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(self.children[0].returncode)
                 raise ValueError("body failure")
         self.assertIsNotNone(self.children[0].returncode)
-        await asyncio.gather(process.close(), process.close())
+        await asyncio.gather(process.aclose(), process.aclose())
 
     async def test_close_during_start_waits_and_reaps_child(self):
         self.code = "import time; time.sleep(60)"
@@ -110,7 +110,7 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
         process = self.process()
         starting = asyncio.create_task(process.start())
         await self.spawn_entered.wait()
-        closing = asyncio.create_task(process.close())
+        closing = asyncio.create_task(process.aclose())
         await asyncio.sleep(0)
         self.assertFalse(closing.done())
         self.spawn_release.set()
@@ -126,7 +126,7 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
         starting.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await starting
-        await process.close()
+        await process.aclose()
         self.assertEqual(self.children, [])
 
     async def test_cancelled_close_kills_and_reaps_child(self):
@@ -146,7 +146,7 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
             patch.object(child, "terminate"),
             patch.object(child, "wait", side_effect=delayed_wait),
         ):
-            closing = asyncio.create_task(process.close())
+            closing = asyncio.create_task(process.aclose())
             await entered.wait()
             closing.cancel()
             with self.assertRaises(asyncio.CancelledError):
@@ -166,7 +166,7 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
             async with asyncio.timeout(5):
                 while not ready.exists():
                     await asyncio.sleep(0.01)
-            await process.close()
+            await process.aclose()
         self.assertEqual(self.children[0].returncode, -signal.SIGKILL)
 
     async def test_concurrent_close_escalates_once(self):
@@ -178,7 +178,7 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
             patch.object(child, "terminate") as terminate,
             patch.object(child, "kill", wraps=child.kill) as kill,
         ):
-            await asyncio.gather(process.close(), process.close())
+            await asyncio.gather(process.aclose(), process.aclose())
         terminate.assert_called_once()
         kill.assert_called_once()
         self.assertIsNotNone(child.returncode)
@@ -212,14 +212,14 @@ class BridgeProcessTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaisesRegex(OSError, "cannot execute"):
                 await process.start()
-        await process.close()
+        await process.aclose()
         self.assertEqual(self.children, [])
         self.assertIs(await process.start(), process)
 
     async def test_close_before_start_allows_start(self):
         process = self.process()
-        await process.close()
-        await process.close()
+        await process.aclose()
+        await process.aclose()
         self.assertEqual(self.calls, [])
         self.assertIs(await process.start(), process)
 

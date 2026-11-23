@@ -2,10 +2,7 @@ import unittest
 
 from pydantic import ValidationError
 
-import vfspy
-import vfspy.server
-from vfspy.server import RpcServer
-from vfspy.server.config import InitialEntry, RpcServerConfig
+from vfspy.server import InitialEntry, RpcServerConfig
 
 
 def settings(**overrides):
