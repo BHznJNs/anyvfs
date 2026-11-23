@@ -3,13 +3,14 @@
 import os
 import subprocess
 import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+from build_bridge import PACKAGE_ROOT, shared_root
 
 
 def main():
-    tool_bin = ROOT / ".tools" / "bin"
+    root = shared_root()
+    proto = root / "proto"
+    tool_bin = root / ".tools" / "bin"
     tool_bin.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "GOBIN": str(tool_bin)}
     for module in (
@@ -19,8 +20,8 @@ def main():
         executable = module.split("/")[-1].split("@")[0] + (".exe" if os.name == "nt" else "")
         if not (tool_bin / executable).exists():
             subprocess.run(["go", "install", module], check=True, env=env)
-    python_out = ROOT / "src/vfspy/_rpc"
-    go_out = ROOT / "native/internal/rpc"
+    python_out = PACKAGE_ROOT / "src/vfspy/_rpc"
+    go_out = root / "native/internal/rpc"
     python_out.mkdir(parents=True, exist_ok=True)
     go_out.mkdir(parents=True, exist_ok=True)
     suffix = ".exe" if os.name == "nt" else ""
@@ -29,7 +30,7 @@ def main():
             sys.executable,
             "-m",
             "grpc_tools.protoc",
-            f"-I{ROOT / 'proto'}",
+            f"-I{proto}",
             f"--python_out={python_out}",
             f"--pyi_out={python_out}",
             f"--grpc_python_out={python_out}",
@@ -39,7 +40,7 @@ def main():
             "--go_opt=paths=source_relative",
             f"--go-grpc_out={go_out}",
             "--go-grpc_opt=paths=source_relative",
-            str(ROOT / "proto/session.proto"),
+            str(proto / "session.proto"),
         ],
         check=True,
     )

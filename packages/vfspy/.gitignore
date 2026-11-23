@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+
+# Generated Python RPC bindings.
+/src/vfspy/_rpc/*
+!/src/vfspy/_rpc/__init__.py

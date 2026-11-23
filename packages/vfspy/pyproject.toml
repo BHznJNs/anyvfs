@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 packages = ["src/vfspy"]
 artifacts = ["src/vfspy/_rpc"]
 
-[tool.hatch.build.targets.wheel.hooks.custom]
+[tool.hatch.build.hooks.custom]
 path = "scripts/hatch_build.py"
 
 [tool.hatch.build.targets.sdist]

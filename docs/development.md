@@ -1,5 +1,7 @@
 # 开发说明
 
+Python 客户端的源码、测试和打包配置位于 `packages/vfspy/`。仓库根目录的 `native/` 和 `proto/` 提供共享的 Go 桥接程序和 RPC 协议。除 cibuildwheel 命令外，以下命令均在 `packages/vfspy/` 下运行。
+
 ## 协议生成
 
 生成脚本需要 Go 和开发依赖，使用固定的 `grpcio-tools==1.78.0`、`protoc-gen-go@v1.36.6`、`protoc-gen-go-grpc@v1.5.1`，首次安装 Go 生成器需要下载依赖。Python 和 Go 的 RPC 生成文件不纳入 Git；首次检出或修改 `proto/session.proto` 后，需在导入 Python 绑定、运行 Go 测试或构建前执行生成脚本：
@@ -34,10 +36,12 @@ uv build
 
 `uv build` 会在构建 wheel 时自动调用 Go 构建脚本并收录本次编译的二进制；sdist 包含 Go 源码与构建脚本，可从源码重新构建。`uv sync` 的 editable 安装不编译或捆绑 bridge，开发时仍可使用独立脚本生成 `bin/` 下的程序。
 
-发布工作流使用 cibuildwheel 4.3.5 构建 Windows x64 和 Linux x86_64（manylinux_2_28）wheel，再与 sdist 一起发布。Linux 构建容器会安装 Go 1.27.4 和 FUSE 开发头文件，并通过 auditwheel 修复平台标签。本地可运行：
+独立桥接程序写入仓库根目录的 `bin/`，Python 分发包写入 `packages/vfspy/dist/`。
+
+发布工作流使用 cibuildwheel 4.3.5 构建 Windows x64 和 Linux x86_64（manylinux_2_28）wheel，再与 sdist 一起发布。Linux 构建容器会安装 Go 1.27.4 和 FUSE 开发头文件，并通过 auditwheel 修复平台标签。本地可在仓库根目录运行：
 
 ```console
-uvx cibuildwheel==4.3.5 --output-dir dist
+uvx cibuildwheel==4.3.5 packages/vfspy --output-dir packages/vfspy/dist
 ```
 
 运行 cibuildwheel 前需先生成 RPC 绑定。Windows 需先将 Go 加入 PATH；Linux wheel 构建需运行 Docker。cibuildwheel 未配置额外测试命令。

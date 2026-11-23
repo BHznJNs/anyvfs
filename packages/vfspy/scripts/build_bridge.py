@@ -4,10 +4,19 @@ import os
 import subprocess
 from pathlib import Path
 
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+
+
+def shared_root() -> Path:
+    """Locate the shared sources in either an unpacked sdist or the checkout."""
+    if (PACKAGE_ROOT / "native/go.mod").is_file():
+        return PACKAGE_ROOT
+    return PACKAGE_ROOT.parents[1]
+
 
 def build_bridge() -> Path:
     """Compile the bridge and return the absolute path to its executable."""
-    root = Path(__file__).resolve().parents[1]
+    root = shared_root()
     suffix = ".exe" if os.name == "nt" else ""
     output = root / "bin" / ("anyvfs-native" + suffix)
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,4 @@
-name: Publish Python distribution to PyPI
+name: Publish vfspy to PyPI
 
 on: push
 
@@ -9,13 +9,16 @@ jobs:
   build-sdist:
     name: Build source distribution
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/vfspy
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version-file: .python-version
+          python-version-file: packages/vfspy/.python-version
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
@@ -35,12 +38,15 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: python-package-sdist
-          path: dist/
+          path: packages/vfspy/dist/
           if-no-files-found: error
 
   build-wheels:
     name: Build wheel / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: packages/vfspy
     strategy:
       fail-fast: false
       matrix:
@@ -55,7 +61,7 @@ jobs:
           cache-dependency-path: native/go.sum
       - uses: actions/setup-python@v7
         with:
-          python-version-file: .python-version
+          python-version-file: packages/vfspy/.python-version
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
@@ -66,14 +72,15 @@ jobs:
       - name: Build wheels with bundled Go bridge
         uses: pypa/cibuildwheel@v4.3.5
         with:
-          output-dir: dist
+          package-dir: packages/vfspy
+          output-dir: packages/vfspy/dist
       - name: Check distribution metadata
         run: uvx twine check --strict dist/*
       - name: Store wheel packages
         uses: actions/upload-artifact@v7
         with:
           name: python-package-wheels-${{ matrix.os }}
-          path: dist/*.whl
+          path: packages/vfspy/dist/*.whl
           if-no-files-found: error
 
   publish-to-pypi:

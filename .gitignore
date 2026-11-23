@@ -1,14 +1,7 @@
-.venv/
-__pycache__/
-.pytest_cache/
-.ruff_cache/
-*.egg-info/
-dist/
 bin/
 .tools/
 .cache/
 *.log
 
-# RPC bindings are regenerated from proto/ before testing and packaging.
-/src/vfspy/_rpc/*
+# Generated Go RPC bindings.
 /native/internal/rpc/*.pb.go

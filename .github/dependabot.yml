@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: uv
-    directory: "/"
+    directory: "/packages/vfspy"
     schedule:
       interval: daily
       time: "13:00"

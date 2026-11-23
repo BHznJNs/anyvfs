@@ -1,4 +1,4 @@
-"""Compile and include the Go bridge when building a distribution wheel."""
+"""Include the shared Go bridge in Python distributions."""
 
 import sysconfig
 from importlib.util import module_from_spec, spec_from_file_location
@@ -9,6 +9,8 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 
 class _BuildBridgeModule(Protocol):
+    def shared_root(self) -> Path: ...
+
     def build_bridge(self) -> Path: ...
 
 
@@ -29,7 +31,15 @@ class CustomBuildHook(BuildHookInterface):
             return
 
         # Isolated build environments do not put scripts/ on the import path.
-        module = _load_build_bridge_module(Path(self.root))
+        package_root = Path(self.root).resolve()
+        module = _load_build_bridge_module(package_root)
+        if self.target_name == "sdist":
+            root = module.shared_root()
+            if root != package_root:
+                for directory in ("native", "proto", "docs"):
+                    build_data["force_include"][str(root / directory)] = directory
+            return
+
         bridge = module.build_bridge()
         build_data["force_include"][str(bridge)] = f"vfspy/_bin/{bridge.name}"
         build_data["pure_python"] = False

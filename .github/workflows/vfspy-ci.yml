@@ -1,4 +1,4 @@
-name: Test
+name: vfspy CI
 
 on:
   push:
@@ -22,6 +22,7 @@ jobs:
     defaults:
       run:
         shell: bash
+        working-directory: packages/vfspy
     steps:
       - uses: actions/checkout@v7
         with:
@@ -55,13 +56,17 @@ jobs:
       - name: Smoke test the installed wheel
         run: |
           uv run --isolated --no-project --python "${{ matrix.python-version }}" --with ./dist/*.whl python -I - <<'PY'
+          import os
+
           from vfspy._rpc import session_pb2 as pb
           from vfspy._rpc import session_pb2_grpc as rpc
+          from vfspy.process._executable import bundled_bridge_executable
 
           config = pb.Config(case_sensitive=True, max_file_bytes=1024, max_total_bytes=4096)
           assert pb.Config.FromString(config.SerializeToString()) == config
           assert callable(rpc.ControllerStub)
           assert callable(rpc.add_ControllerServicer_to_server)
+          assert os.access(bundled_bridge_executable(), os.X_OK)
           PY
 
   native:
@@ -87,15 +92,15 @@ jobs:
           cache-dependency-path: native/go.sum
       - uses: actions/setup-python@v7
         with:
-          python-version-file: .python-version
+          python-version-file: packages/vfspy/.python-version
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
       - name: Install RPC generation dependencies
-        working-directory: .
+        working-directory: packages/vfspy
         run: uv sync --locked --only-group dev --no-install-project
       - name: Generate RPC bindings
-        working-directory: .
+        working-directory: packages/vfspy
         run: uv run --no-sync python scripts/generate_proto.py
       - name: Install FUSE build dependencies
         if: runner.os == 'Linux'

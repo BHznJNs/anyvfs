@@ -9,6 +9,6 @@ def bundled_bridge_executable() -> Path:
     if not executable.is_file():
         raise FileNotFoundError(
             "bundled native bridge not found; build it with "
-            "scripts/build_bridge.py and set BridgeProcessConfig(executable=...)"
+            "packages/vfspy/scripts/build_bridge.py and set BridgeProcessConfig(executable=...)"
         )
     return executable

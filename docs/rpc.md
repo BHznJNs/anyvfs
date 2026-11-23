@@ -124,7 +124,7 @@ proto 没有自定义错误消息。服务端可通过标准 gRPC status 拒绝�
 
 | 语言 | 路径 | 生成入口 |
 | --- | --- | --- |
-| Python | `src/vfspy/_rpc/session_pb2.py`、`session_pb2.pyi`、`session_pb2_grpc.py` | `pb.Config` 等消息，`rpc.ControllerServicer`、`rpc.add_ControllerServicer_to_server`、`rpc.ControllerStub` |
+| Python | `packages/vfspy/src/vfspy/_rpc/` 下的 `session_pb2.py`、`session_pb2.pyi`、`session_pb2_grpc.py` | `pb.Config` 等消息，`rpc.ControllerServicer`、`rpc.add_ControllerServicer_to_server`、`rpc.ControllerStub` |
 | Go | `native/internal/rpc/session.pb.go`、`session_grpc.pb.go` | `rpc.NewControllerClient` 及消息类型；Go 生成包声明为 `rpc`，import 路径是 `anyvfs/native/internal/rpc` |
 
 Python 导入：
@@ -139,4 +139,4 @@ from vfspy._rpc import session_pb2_grpc as rpc
 3. 以相同 token、端口、挂载点启动 Go，等待 Notice.ready 后使用挂载路径。
 4. 顺序处理 Event，关闭时遵循 Stop/Stopped 流程。
 
-在项目根目录运行 `uv run python scripts/generate_proto.py` 可从同一 proto 重新生成两种语言绑定。生成脚本会修正 Python 的相对导入。修改协议后应运行该脚本，确保 Go 与 Python 的服务名、消息类型及字段一致。
+在 `packages/vfspy/` 下运行 `uv run python scripts/generate_proto.py` 可从同一 proto 重新生成两种语言绑定。生成脚本会修正 Python 的相对导入。修改协议后应运行该脚本，确保 Go 与 Python 的服务名、消息类型及字段一致。
