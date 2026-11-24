@@ -38,8 +38,7 @@ func newControllerClient(input programInput) (*controllerClient, error) {
 func (c *controllerClient) Startup(ctx context.Context) (*pb.Config, []*pb.BootstrapItem, error) {
 	startup, cancel := context.WithTimeout(ctx, c.startupTimeout)
 	defer cancel()
-	startup = metadata.AppendToOutgoingContext(startup, "authorization", "Bearer "+c.token)
-	bootstrap, err := c.client.Bootstrap(startup, &pb.Empty{})
+	bootstrap, err := c.client.Bootstrap(c.authContext(startup), &pb.Empty{})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -65,8 +64,11 @@ func (c *controllerClient) Startup(ctx context.Context) (*pb.Config, []*pb.Boots
 }
 
 func (c *controllerClient) Session(ctx context.Context) (pb.Controller_SessionClient, error) {
-	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+c.token)
-	return c.client.Session(ctx)
+	return c.client.Session(c.authContext(ctx))
+}
+
+func (c *controllerClient) authContext(ctx context.Context) context.Context {
+	return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+c.token)
 }
 
 func (c *controllerClient) Close() error {
