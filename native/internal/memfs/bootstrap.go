@@ -5,12 +5,11 @@ import (
 	"strings"
 
 	pb "anyvfs/native/internal/rpc"
-	"github.com/winfsp/cgofuse/fuse"
 )
 
 // importInitialEntries builds the tree before mounting and emits no mutation events.
 func (f *FS) importInitialEntries(entries []*pb.BootstrapItem) error {
-	declaredDirectories := make(map[*node]struct{})
+	declaredDirectories := make(map[*dirNode]struct{})
 	for _, entry := range entries {
 		switch value := entry.GetValue().(type) {
 		case *pb.BootstrapItem_File:
@@ -49,7 +48,7 @@ func (f *FS) importInitialFile(file *pb.InitialFile) error {
 	if parent.children[f.key(name)] != nil {
 		return fmt.Errorf("initial file path %q already exists", p)
 	}
-	n := f.makeNode(parent, name, fuse.S_IFREG|0644)
+	n := f.newFileNode(parent, name, 0644)
 	data := file.GetData()
 	if code := f.resize(n, int64(len(data))); code != 0 {
 		return fmt.Errorf("initial file %q exceeds memory limits: %d", p, code)
@@ -59,7 +58,7 @@ func (f *FS) importInitialFile(file *pb.InitialFile) error {
 	return nil
 }
 
-func (f *FS) initialParent(p string) (*node, string, error) {
+func (f *FS) initialParent(p string) (*dirNode, string, error) {
 	if !strings.HasPrefix(p, "/") {
 		return nil, "", fmt.Errorf("invalid initial path %q", p)
 	}
@@ -80,14 +79,12 @@ func (f *FS) initialParent(p string) (*node, string, error) {
 }
 
 // ensureInitialDirectory returns nil when a file already occupies the name.
-func (f *FS) ensureInitialDirectory(parent *node, name string) *node {
-	dir := parent.children[f.key(name)]
-	if dir == nil {
-		dir = f.makeNode(parent, name, fuse.S_IFDIR|0755)
-		f.attach(parent, dir)
+func (f *FS) ensureInitialDirectory(parent *dirNode, name string) *dirNode {
+	if existing := parent.children[f.key(name)]; existing != nil {
+		dir, _ := existing.(*dirNode)
+		return dir
 	}
-	if !dir.dir() {
-		return nil
-	}
+	dir := f.newDirNode(parent, name, 0755)
+	f.attach(parent, dir)
 	return dir
 }

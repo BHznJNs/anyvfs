@@ -45,17 +45,17 @@ func TestBootstrapImportsFilesAndDirectories(t *testing.T) {
 	}
 	n, c := f.lookup("/docs/guides/a.bin")
 	mustCode(t, c, 0)
-	if got := n.location(); got != "/Docs/guides/a.bin" {
+	if got := n.metadata().location(); got != "/Docs/guides/a.bin" {
 		t.Fatalf("got path %q, want explicit directory spelling", got)
 	}
 	n, c = f.lookup("/Docs/empty.txt")
 	mustCode(t, c, 0)
-	if n.dir() || len(n.data) != 0 {
+	if file, ok := n.(*fileNode); !ok || len(file.data) != 0 {
 		t.Fatal("expected a zero-byte file")
 	}
 	n, c = f.lookup("/inbox/pending")
 	mustCode(t, c, 0)
-	if !n.dir() || len(n.children) != 0 {
+	if dir, ok := n.(*dirNode); !ok || len(dir.children) != 0 {
 		t.Fatal("expected an empty directory")
 	}
 	if len(drainNotices(t, out)) != 0 {
@@ -132,6 +132,8 @@ func TestHandlesSurviveRenameReplacementAndUnlink(t *testing.T) {
 	f, out := newFS(t, true, 1024, 2048, bootstrapFile("/a", "original"), bootstrapFile("/b", "target"))
 	c, a := f.Open("/a", fuse.O_RDWR)
 	mustCode(t, c, 0)
+	var original fuse.Stat_t
+	mustCode(t, f.Getattr("", &original, a), 0)
 	c, b := f.Open("/b", fuse.O_RDWR)
 	mustCode(t, c, 0)
 	mustCode(t, f.Rename("/a", "/b"), 0)
@@ -141,12 +143,20 @@ func TestHandlesSurviveRenameReplacementAndUnlink(t *testing.T) {
 	mustCode(t, f.Unlink("/b"), 0)
 	mustCode(t, f.Write("/b", []byte("!"), 8, a), 1)
 	notices := drainNotices(t, out)
-	event := notices[len(notices)-1].GetEvent().GetFileWritten()
-	if event.Linked || event.Path != "/b" {
-		t.Fatal("unlinked write must identify old inode and path")
+	event := notices[len(notices)-1].GetEvent()
+	written := event.GetFileWritten()
+	if written == nil || written.Linked || written.Path != "" || event.Inode != original.Ino {
+		t.Fatal("unlinked write must identify the original inode without a path")
 	}
 	if string(read(t, f, a)) != "original!" {
 		t.Fatal("open inode did not survive unlink")
+	}
+	mustCode(t, f.Truncate("", 8, a), 0)
+	notices = drainNotices(t, out)
+	event = notices[len(notices)-1].GetEvent()
+	truncated := event.GetFileTruncated()
+	if truncated == nil || truncated.Linked || truncated.Path != "" || event.Inode != original.Ino {
+		t.Fatal("unlinked truncate must identify the original inode without a path")
 	}
 	mustCode(t, f.Release("", a), 0)
 	mustCode(t, f.Release("", b), 0)
@@ -222,6 +232,32 @@ func TestDirectoryRenameAndEnumerationSnapshot(t *testing.T) {
 		t.Fatal("directory offset/snapshot changed")
 	}
 }
+func TestFileAndDirectoryHandleDispatch(t *testing.T) {
+	f, _ := newFS(t, true, 64, 64, bootstrapFile("/file", "text"), bootstrapDirectory("/dir"))
+	code, file := f.Open("/file", fuse.O_RDWR)
+	mustCode(t, code, 0)
+	code, dir := f.Opendir("/dir")
+	mustCode(t, code, 0)
+
+	var stat fuse.Stat_t
+	mustCode(t, f.Getattr("/missing", &stat, file), 0)
+	if stat.Mode&fuse.S_IFMT != fuse.S_IFREG || stat.Size != 4 {
+		t.Fatalf("unexpected file handle stat: %+v", stat)
+	}
+	mustCode(t, f.Getattr("/missing", &stat, dir), 0)
+	if stat.Mode&fuse.S_IFMT != fuse.S_IFDIR {
+		t.Fatalf("unexpected directory handle stat: %+v", stat)
+	}
+	buf := make([]byte, 1)
+	mustCode(t, f.Read("/dir", buf, 0, dir), -fuse.EISDIR)
+	mustCode(t, f.Write("/dir", buf, 0, dir), -fuse.EBADF)
+	mustCode(t, f.Truncate("/dir", 0, dir), -fuse.EBADF)
+	mustCode(t, f.Truncate("/dir", 0, 0), -fuse.EISDIR)
+	mustCode(t, f.Readdir("/file", nil, 0, file), -fuse.EBADF)
+	mustCode(t, f.Release("/file", file), 0)
+	mustCode(t, f.Releasedir("/dir", dir), 0)
+}
+
 func TestConcurrentAppendAndEventOrdering(t *testing.T) {
 	f, out := newFS(t, true, 1024, 1024)
 	c, h := f.Create("/a", fuse.O_WRONLY|fuse.O_APPEND, 0644)

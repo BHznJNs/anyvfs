@@ -1,9 +1,11 @@
 package memfs
 
 import (
-	"github.com/winfsp/cgofuse/fuse"
 	"time"
+
 	pb "anyvfs/native/internal/rpc"
+
+	"github.com/winfsp/cgofuse/fuse"
 )
 
 func (f *FS) Getattr(p string, st *fuse.Stat_t, fh uint64) int {
@@ -11,7 +13,7 @@ func (f *FS) Getattr(p string, st *fuse.Stat_t, fh uint64) int {
 	defer f.mu.Unlock()
 	n, c := f.target(p, fh)
 	if c == 0 {
-		*st = n.stat
+		*st = n.metadata().stat
 	}
 	return c
 }
@@ -31,7 +33,7 @@ func (f *FS) Access(p string, mask uint32) int {
 		return c
 	}
 	// A single mounting user; no impersonation or ACL emulation.
-	if (n.stat.Mode>>6)&mask != mask {
+	if (n.metadata().stat.Mode>>6)&mask != mask {
 		return -fuse.EACCES
 	}
 	return 0
@@ -39,26 +41,28 @@ func (f *FS) Access(p string, mask uint32) int {
 func (f *FS) Chmod(p string, mode uint32) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	n, c := f.lookup(p)
+	entry, c := f.lookup(p)
 	if c != 0 {
 		return c
 	}
+	n := entry.metadata()
 	mode = n.stat.Mode&fuse.S_IFMT | mode&07777
 	if mode == n.stat.Mode {
 		return 0
 	}
 	n.stat.Mode = mode
 	n.stat.Ctim = fuse.Now()
-	f.commit(n, &pb.Event{Kind: &pb.Event_ModeChanged{ModeChanged: &pb.ModeChanged{Path: n.location(), Mode: mode}}})
+	f.commit(entry, &pb.Event{Kind: &pb.Event_ModeChanged{ModeChanged: &pb.ModeChanged{Path: n.location(), Mode: mode}}})
 	return 0
 }
 func (f *FS) Chown(p string, uid, gid uint32) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	n, c := f.lookup(p)
+	entry, c := f.lookup(p)
 	if c != 0 {
 		return c
 	}
+	n := entry.metadata()
 	if uid == ^uint32(0) {
 		uid = n.stat.Uid
 	}
@@ -71,16 +75,17 @@ func (f *FS) Chown(p string, uid, gid uint32) int {
 	n.stat.Uid = uid
 	n.stat.Gid = gid
 	n.stat.Ctim = fuse.Now()
-	f.commit(n, &pb.Event{Kind: &pb.Event_OwnerChanged{OwnerChanged: &pb.OwnerChanged{Path: n.location(), Uid: uid, Gid: gid}}})
+	f.commit(entry, &pb.Event{Kind: &pb.Event_OwnerChanged{OwnerChanged: &pb.OwnerChanged{Path: n.location(), Uid: uid, Gid: gid}}})
 	return 0
 }
 func (f *FS) Utimens(p string, times []fuse.Timespec) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	n, c := f.lookup(p)
+	entry, c := f.lookup(p)
 	if c != 0 {
 		return c
 	}
+	n := entry.metadata()
 	now := fuse.NewTimespec(time.Now())
 	at, mt := now, now
 	if len(times) != 0 && len(times) != 2 {
@@ -111,7 +116,7 @@ func (f *FS) Utimens(p string, times []fuse.Timespec) int {
 	n.stat.Atim = at
 	n.stat.Mtim = mt
 	n.stat.Ctim = now
-	f.commit(n, &pb.Event{Kind: &pb.Event_TimesChanged{TimesChanged: &pb.TimesChanged{
+	f.commit(entry, &pb.Event{Kind: &pb.Event_TimesChanged{TimesChanged: &pb.TimesChanged{
 		Path: n.location(), AtimeNs: at.Sec*1e9 + at.Nsec, MtimeNs: mt.Sec*1e9 + mt.Nsec}}})
 	return 0
 }

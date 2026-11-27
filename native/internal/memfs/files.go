@@ -1,35 +1,35 @@
 package memfs
 
 import (
-	"github.com/winfsp/cgofuse/fuse"
 	pb "anyvfs/native/internal/rpc"
+
+	"github.com/winfsp/cgofuse/fuse"
 )
 
-func (f *FS) newHandle(n *node, flags int) uint64 {
-	f.nextHandle++
-	n.refs++
-	f.handles[f.nextHandle] = &handle{n: n, flags: flags}
-	return f.nextHandle
+type fileNode struct {
+	nodeMeta
+	data []byte
 }
-func (f *FS) create(p string, mode uint32, dir bool) (*node, int) {
-	parent, name, c := f.parent(p)
+
+func (f *FS) newFileNode(parent *dirNode, name string, mode uint32) *fileNode {
+	return &fileNode{nodeMeta: f.makeNodeMeta(parent, name, fuse.S_IFREG|mode)}
+}
+
+type fileHandle struct {
+	file  *fileNode
+	flags int
+}
+
+func (h *fileHandle) openedNode() node { return h.file }
+
+func (f *FS) createFile(p string, mode uint32) (*fileNode, int) {
+	parent, name, c := f.creationParent(p)
 	if c != 0 {
 		return nil, c
 	}
-	if parent.children[f.key(name)] != nil {
-		return nil, -fuse.EEXIST
-	}
-	kind := uint32(fuse.S_IFREG)
-	if dir {
-		kind = fuse.S_IFDIR
-	}
-	n := f.makeNode(parent, name, kind|mode&07777)
+	n := f.newFileNode(parent, name, mode&07777)
 	f.attach(parent, n)
-	if dir {
-		f.commit(n, &pb.Event{Kind: &pb.Event_DirectoryCreated{DirectoryCreated: &pb.DirectoryCreated{Path: n.location(), Mode: n.stat.Mode}}})
-	} else {
-		f.commit(n, &pb.Event{Kind: &pb.Event_FileCreated{FileCreated: &pb.FileCreated{Path: n.location(), Mode: n.stat.Mode}}})
-	}
+	f.commit(n, &pb.Event{Kind: &pb.Event_FileCreated{FileCreated: &pb.FileCreated{Path: n.location(), Mode: n.stat.Mode}}})
 	return n, 0
 }
 func (f *FS) Create(p string, flags int, mode uint32) (int, uint64) {
@@ -42,17 +42,11 @@ func (f *FS) Create(p string, flags int, mode uint32) (int, uint64) {
 		}
 		return f.open(n, flags)
 	}
-	n, c := f.create(p, mode, false)
+	n, c := f.createFile(p, mode)
 	if c != 0 {
 		return c, 0
 	}
-	return 0, f.newHandle(n, flags)
-}
-func (f *FS) Mkdir(p string, mode uint32) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	_, c := f.create(p, mode, true)
-	return c
+	return 0, f.registerHandle(&fileHandle{file: n, flags: flags})
 }
 func (f *FS) Mknod(p string, mode uint32, dev uint64) int {
 	if mode&fuse.S_IFMT != fuse.S_IFREG {
@@ -60,22 +54,23 @@ func (f *FS) Mknod(p string, mode uint32, dev uint64) int {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	_, c := f.create(p, mode, false)
+	_, c := f.createFile(p, mode)
 	return c
 }
-func (f *FS) open(n *node, flags int) (int, uint64) {
-	if n.dir() {
+func (f *FS) open(n node, flags int) (int, uint64) {
+	file, ok := n.(*fileNode)
+	if !ok {
 		return -fuse.EISDIR, 0
 	}
 	if flags&fuse.O_TRUNC != 0 {
 		if flags&fuse.O_ACCMODE == fuse.O_RDONLY {
 			return -fuse.EACCES, 0
 		}
-		if c := f.truncate(n, 0); c != 0 {
+		if c := f.truncate(file, 0); c != 0 {
 			return c, 0
 		}
 	}
-	return 0, f.newHandle(n, flags)
+	return 0, f.registerHandle(&fileHandle{file: file, flags: flags})
 }
 func (f *FS) Open(p string, flags int) (int, uint64) {
 	f.mu.Lock()
@@ -89,32 +84,30 @@ func (f *FS) Open(p string, flags int) (int, uint64) {
 func (f *FS) Read(p string, buf []byte, offset int64, fh uint64) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	h := f.handles[fh]
-	if h == nil || h.flags&fuse.O_ACCMODE == fuse.O_WRONLY {
-		return -fuse.EBADF
-	}
-	if h.n.dir() {
+	opened := f.handles[fh]
+	if _, ok := opened.(*dirHandle); ok {
 		return -fuse.EISDIR
+	}
+	h, ok := opened.(*fileHandle)
+	if !ok || h.flags&fuse.O_ACCMODE == fuse.O_WRONLY {
+		return -fuse.EBADF
 	}
 	if offset < 0 {
 		return -fuse.EINVAL
 	}
-	if offset >= int64(len(h.n.data)) {
+	if offset >= int64(len(h.file.data)) {
 		return 0
 	}
-	return copy(buf, h.n.data[int(offset):])
+	return copy(buf, h.file.data[int(offset):])
 }
 func (f *FS) Write(p string, buf []byte, offset int64, fh uint64) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	h := f.handles[fh]
-	if h == nil || h.flags&fuse.O_ACCMODE == fuse.O_RDONLY {
+	h, ok := f.handles[fh].(*fileHandle)
+	if !ok || h.flags&fuse.O_ACCMODE == fuse.O_RDONLY {
 		return -fuse.EBADF
 	}
-	n := h.n
-	if n.dir() {
-		return -fuse.EISDIR
-	}
+	n := h.file
 	if offset < 0 {
 		return -fuse.EINVAL
 	}
@@ -139,10 +132,7 @@ func (f *FS) Write(p string, buf []byte, offset int64, fh uint64) int {
 		Path: n.location(), Offset: offset, Data: append([]byte(nil), buf...), Size: n.stat.Size, Linked: n.linked}}})
 	return len(buf)
 }
-func (f *FS) truncate(n *node, size int64) int {
-	if n.dir() {
-		return -fuse.EISDIR
-	}
+func (f *FS) truncate(n *fileNode, size int64) int {
 	old := int64(len(n.data))
 	if size == old {
 		return 0
@@ -159,39 +149,48 @@ func (f *FS) Truncate(p string, size int64, fh uint64) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if fh != 0 && fh != ^uint64(0) {
-		h := f.handles[fh]
-		if h == nil || h.flags&fuse.O_ACCMODE == fuse.O_RDONLY {
+		h, ok := f.handles[fh].(*fileHandle)
+		if !ok || h.flags&fuse.O_ACCMODE == fuse.O_RDONLY {
 			return -fuse.EBADF
 		}
+		return f.truncate(h.file, size)
 	}
-	n, c := f.target(p, fh)
+	n, c := f.lookup(p)
 	if c != 0 {
 		return c
 	}
-	return f.truncate(n, size)
+	file, ok := n.(*fileNode)
+	if !ok {
+		return -fuse.EISDIR
+	}
+	return f.truncate(file, size)
 }
-func (f *FS) Release(p string, fh uint64) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	h := f.handles[fh]
-	if h == nil {
-		return -fuse.EBADF
+func (f *FS) resize(n *fileNode, size int64) int {
+	if size < 0 {
+		return -fuse.EINVAL
 	}
-	delete(f.handles, fh)
-	h.n.refs--
-	if !h.n.linked && h.n.refs == 0 {
-		f.used -= int64(len(h.n.data))
-		h.n.data = nil
+	if size > f.config.MaxFileBytes {
+		return -fuse.EFBIG
 	}
+	delta := size - int64(len(n.data))
+	if delta > f.config.MaxTotalBytes-f.used {
+		return -fuse.ENOSPC
+	}
+	if delta > 0 {
+		n.data = append(n.data, make([]byte, int(delta))...)
+	} else if delta < 0 {
+		// Release backing storage too, so shrinking cannot hide old allocations.
+		n.data = append([]byte(nil), n.data[:int(size)]...)
+	}
+	f.used += delta
+	n.stat.Size = size
+	n.stat.Blocks = (size + 511) / 512
 	return 0
 }
-func (f *FS) Flush(p string, fh uint64) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.handles[fh] == nil {
-		return -fuse.EBADF
+
+func (f *FS) reclaimUnlinkedFile(n node) {
+	if file, ok := n.(*fileNode); ok && !file.linked && file.refs == 0 {
+		f.used -= int64(len(file.data))
+		file.data = nil
 	}
-	return 0
 }
-func (f *FS) Fsync(p string, dataOnly bool, fh uint64) int    { return f.Flush(p, fh) }
-func (f *FS) Fsyncdir(p string, dataOnly bool, fh uint64) int { return f.Flush(p, fh) }

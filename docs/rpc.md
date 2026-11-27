@@ -98,7 +98,7 @@ Go 收到空命令或未知命令时会记录告警并请求卸载。
 | `owner_changed = 18` | `OwnerChanged` | `path: string = 1`；`uid: uint32 = 2`；`gid: uint32 = 3` | 属主/组实际改变后的完整值。 |
 | `times_changed = 19` | `TimesChanged` | `path: string = 1`；`atime_ns: int64 = 2`；`mtime_ns: int64 = 3` | 显式修改访问/修改时间后，两者的 Unix epoch 纳秒值。写入本身只发 Written，不额外发 TimesChanged；读取不更新 atime。 |
 
-`linked=false` 表示事件对应的打开 inode 已脱离目录树，`path` 是脱离时保存的旧路径；该路径此时可能已被另一个文件复用，应结合公共 inode 区分。重命名后仍有链接的对象使用其当前路径。
+`linked=false` 表示事件对应的打开 inode 已脱离目录树，此时 `path` 为空，接收方使用事件的 `inode` 标识文件。`linked=true` 时，`path` 是文件的当前路径。
 
 文件操作失败不产生相应成功事件。单次系统调用可能导致多种底层操作，不能假设一次应用层保存只对应一个 Event。事件在同一互斥锁内分配 revision 并排队；通知发送由单独协程顺序消费，文件系统操作不等待控制进程回调。控制服务消费缓慢时队列可能增长。
 

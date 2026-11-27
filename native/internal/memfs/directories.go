@@ -1,10 +1,48 @@
 package memfs
 
 import (
-	"github.com/winfsp/cgofuse/fuse"
 	"sort"
+
 	pb "anyvfs/native/internal/rpc"
+
+	"github.com/winfsp/cgofuse/fuse"
 )
+
+type dirNode struct {
+	nodeMeta
+	children map[string]node
+}
+
+func (f *FS) newDirNode(parent *dirNode, name string, mode uint32) *dirNode {
+	meta := f.makeNodeMeta(parent, name, fuse.S_IFDIR|mode)
+	meta.stat.Nlink = 2
+	return &dirNode{nodeMeta: meta, children: make(map[string]node)}
+}
+
+type directoryEntry struct {
+	name string
+	stat fuse.Stat_t
+}
+
+type dirHandle struct {
+	dir     *dirNode
+	entries []directoryEntry
+}
+
+func (h *dirHandle) openedNode() node { return h.dir }
+
+func (f *FS) Mkdir(p string, mode uint32) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	parent, name, code := f.creationParent(p)
+	if code != 0 {
+		return code
+	}
+	dir := f.newDirNode(parent, name, mode&07777)
+	f.attach(parent, dir)
+	f.commit(dir, &pb.Event{Kind: &pb.Event_DirectoryCreated{DirectoryCreated: &pb.DirectoryCreated{Path: dir.location(), Mode: dir.stat.Mode}}})
+	return 0
+}
 
 func (f *FS) Opendir(p string) (int, uint64) {
 	f.mu.Lock()
@@ -13,31 +51,30 @@ func (f *FS) Opendir(p string) (int, uint64) {
 	if c != 0 {
 		return c, 0
 	}
-	if !n.dir() {
+	dir, ok := n.(*dirNode)
+	if !ok {
 		return -fuse.ENOTDIR, 0
 	}
-	fh := f.newHandle(n, fuse.O_RDONLY)
-	h := f.handles[fh]
-	parent := n.parent
+	parent := dir.parent
 	if parent == nil {
-		parent = n
+		parent = dir
 	}
-	h.entries = []directoryEntry{{".", n.stat}, {"..", parent.stat}}
-	names := make([]string, 0, len(n.children))
-	for name := range n.children {
+	entries := []directoryEntry{{".", dir.stat}, {"..", parent.stat}}
+	names := make([]string, 0, len(dir.children))
+	for name := range dir.children {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		child := n.children[name]
-		h.entries = append(h.entries, directoryEntry{child.name, child.stat})
+		meta := dir.children[name].metadata()
+		entries = append(entries, directoryEntry{meta.name, meta.stat})
 	}
-	return 0, fh
+	return 0, f.registerHandle(&dirHandle{dir: dir, entries: entries})
 }
 func (f *FS) Readdir(p string, fill func(string, *fuse.Stat_t, int64) bool, offset int64, fh uint64) int {
 	f.mu.Lock()
-	h := f.handles[fh]
-	if h == nil || !h.n.dir() {
+	h, ok := f.handles[fh].(*dirHandle)
+	if !ok {
 		f.mu.Unlock()
 		return -fuse.EBADF
 	}
@@ -67,16 +104,17 @@ func (f *FS) remove(p string, dir bool) int {
 	if n == f.root {
 		return -fuse.EBUSY
 	}
-	if dir && !n.dir() {
+	directory, isDir := n.(*dirNode)
+	if dir && !isDir {
 		return -fuse.ENOTDIR
 	}
-	if !dir && n.dir() {
+	if !dir && isDir {
 		return -fuse.EISDIR
 	}
-	if len(n.children) > 0 {
+	if isDir && len(directory.children) > 0 {
 		return -fuse.ENOTEMPTY
 	}
-	location := n.location()
+	location := n.metadata().location()
 	f.detach(n)
 	if dir {
 		f.commit(n, &pb.Event{Kind: &pb.Event_DirectoryRemoved{DirectoryRemoved: &pb.DirectoryRemoved{Path: location}}})
@@ -106,35 +144,34 @@ func (f *FS) Rename(old, new string) int {
 	}
 	dest := parent.children[f.key(name)]
 	replaced := uint64(0)
-	if dest == n && n.name == name && n.parent == parent {
+	meta := n.metadata()
+	_, isDir := n.(*dirNode)
+	if dest == n && meta.name == name && meta.parent == parent {
 		return 0
 	}
 	if dest != nil && dest != n {
-		if dest.dir() && !n.dir() {
+		destDir, destIsDir := dest.(*dirNode)
+		if destIsDir && !isDir {
 			return -fuse.EISDIR
 		}
-		if !dest.dir() && n.dir() {
+		if !destIsDir && isDir {
 			return -fuse.ENOTDIR
 		}
-		if len(dest.children) > 0 {
+		if destIsDir && len(destDir.children) > 0 {
 			return -fuse.ENOTEMPTY
 		}
-		replaced = dest.stat.Ino
+		replaced = dest.metadata().stat.Ino
 	}
-	oldPath := n.location()
+	oldPath := meta.location()
 	if replaced != 0 {
 		f.detach(dest)
 	}
-	delete(n.parent.children, f.key(n.name))
-	if n.dir() {
-		n.parent.stat.Nlink--
-	}
-	f.touch(n.parent)
-	n.name = name
-	n.parent = parent
+	f.removeChild(n)
+	meta.name = name
+	meta.parent = parent
 	f.attach(parent, n)
-	n.stat.Ctim = fuse.Now()
+	meta.stat.Ctim = fuse.Now()
 	f.commit(n, &pb.Event{Kind: &pb.Event_EntryRenamed{EntryRenamed: &pb.EntryRenamed{
-		Path: oldPath, NewPath: n.location(), Directory: n.dir(), ReplacedInode: replaced}}})
+		Path: oldPath, NewPath: meta.location(), Directory: isDir, ReplacedInode: replaced}}})
 	return 0
 }
