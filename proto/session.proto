@@ -2,10 +2,12 @@ syntax = "proto3";
 package anyvfs;
 option go_package = "anyvfs/native/internal/rpc;rpc";
 
-// No filesystem read/write RPC: OS requests execute entirely in Go memory.
+// Static entries are served in Go. Dynamic entries fetch snapshots from the controller.
 service Controller {
   rpc Bootstrap(Empty) returns (stream BootstrapItem);
   rpc Session(stream Notice) returns (stream Command);
+  rpc ListDynamicDirectory(DynamicPathRequest) returns (DynamicDirectoryListing);
+  rpc ReadDynamicFile(DynamicPathRequest) returns (DynamicFileContent);
 }
 message Empty {}
 message Config {
@@ -15,13 +17,45 @@ message Config {
 }
 message InitialFile { string path = 1; bytes data = 2; }
 message InitialDirectory { string path = 1; }
+
+// Bootstrap registers mount-relative absolute paths without invoking their callbacks.
+message InitialDynamicFile { string path = 1; }
+message InitialDynamicDirectory { string path = 1; }
 message BootstrapItem {
   oneof value {
     Config config = 1;
     InitialFile file = 2;
     InitialDirectory directory = 3;
+    InitialDynamicFile dynamic_file = 4;
+    InitialDynamicDirectory dynamic_directory = 5;
   }
 }
+
+// Use the absolute path within the mount, with names from bootstrap and directory listings.
+// Callback failures are reported as non-OK gRPC statuses for the individual call.
+message DynamicPathRequest { string path = 1; }
+
+message DynamicChild {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_FILE = 1;
+    KIND_DIRECTORY = 2;
+  }
+
+  // A single relative path component under the directory being listed.
+  string name = 1;
+  // Must be KIND_FILE or KIND_DIRECTORY.
+  Kind kind = 2;
+}
+
+// A complete snapshot of direct children. An empty list represents an empty directory.
+// Validate the entire list before using it, including name uniqueness under the mount's case rules.
+message DynamicDirectoryListing { repeated DynamicChild children = 1; }
+
+// The complete content snapshot for one open handle, requested on its first read.
+// Empty bytes represent an empty file.
+message DynamicFileContent { bytes data = 1; }
+
 message Ready {}
 message Stopped {}
 message Stop {}
