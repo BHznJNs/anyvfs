@@ -1,6 +1,6 @@
 # gRPC 进程间通信接口
 
-协议源：[`../proto/session.proto`](../proto/session.proto)。本文统一说明 Go 挂载进程与控制服务之间的接口、鉴权、消息、生命周期和故障语义。构建、启动示例、命令行参数默认值与进程输出见 [Go 进程说明](../native/README.md)。
+服务定义见 [`controller.proto`](../proto/controller.proto)，消息定义见 [`bootstrap.proto`](../proto/bootstrap.proto)、[`session.proto`](../proto/session.proto)、[`events.proto`](../proto/events.proto) 和 [`dynamic.proto`](../proto/dynamic.proto)。构建、启动示例、命令行参数默认值与进程输出见 [Go 进程说明](../native/README.md)。
 
 ## 角色与服务
 
@@ -10,6 +10,8 @@
 | --- | --- | --- | --- | --- |
 | `/anyvfs.Controller/Bootstrap` | `Empty`，Go → 控制进程 | `BootstrapItem`，控制进程 → Go | unary → stream | 一次性下发配置和初始文件树 |
 | `/anyvfs.Controller/Session` | `Notice` 流，Go → 控制进程 | `Command` 流，控制进程 → Go | stream ↔ stream | 挂载状态、变更通知及停止命令 |
+| `/anyvfs.Controller/ListDynamicDirectory` | `DynamicPathRequest`，Go → 控制进程 | `DynamicDirectoryListing`，控制进程 → Go | unary | 获取动态目录的直接子项快照，运行时待接入 |
+| `/anyvfs.Controller/ReadDynamicFile` | `DynamicPathRequest`，Go → 控制进程 | `DynamicFileContent`，控制进程 → Go | unary | 获取动态文件的完整内容快照，运行时待接入 |
 
 外部应用通过操作系统的普通文件接口访问挂载路径。Go 挂载进程处理这些请求，把已提交的变更通过 Session 上报给控制进程。访问挂载路径遵循操作系统的访问规则，RPC token 用于 Go 与控制服务之间的鉴权。
 
@@ -42,6 +44,8 @@ BootstrapItem(directory=InitialDirectory(path="/inbox"))
 | `BootstrapItem` | `config: Config = 1` | `oneof value` 的配置分支，只出现在第一条。 |
 | `BootstrapItem` | `file: InitialFile = 2` | `oneof value` 的文件分支，出现在配置之后。 |
 | `BootstrapItem` | `directory: InitialDirectory = 3` | `oneof value` 的目录分支，出现在配置之后。 |
+| `BootstrapItem` | `dynamic_file: InitialDynamicFile = 4` | 动态文件登记，消息只含 `path: string = 1`。运行时待接入。 |
+| `BootstrapItem` | `dynamic_directory: InitialDynamicDirectory = 5` | 动态目录登记，消息只含 `path: string = 1`。运行时待接入。 |
 
 使用挂载根内以 `/` 开头的规范路径。路径组件不能为空、`.` 或 `..`，组件长度至多 255 字节，禁止反斜杠、冒号、NUL、`< > " | ? *`，禁止以点或空格结尾。禁止重复 `/` 和尾随 `/`。`/` 是已存在的根目录，不能作为新条目。初始文件 mode 为 `S_IFREG | 0644`，目录为 `S_IFDIR | 0755`，没有初始 mode/uid/gid/时间字段。
 
@@ -59,7 +63,7 @@ Bootstrap 正常结束后，Go 建立一条长期双向流，再执行挂载。�
 | --- | --- | --- |
 | `ready` | `Ready = 1` | FUSE `Init` 时排入队列，表示挂载初始化到达就绪点。 |
 | `event` | `Event = 2` | 一次已经提交的文件系统变更。 |
-| `stopped` | `Stopped = 4` | 挂载调用返回且回调静止后排入队尾，之后 Go 关闭请求流发送方向。挂载失败时也可能发送它，不能单凭它推断曾经 Ready。 |
+| `stopped` | `Stopped = 3` | 挂载调用返回且回调静止后排入队尾，之后 Go 关闭请求流发送方向。挂载失败时也可能发送它，不能单凭它推断曾经 Ready。 |
 
 `Ready {}`、`Stopped {}` 都是无字段消息。普通成功挂载中 Ready 先于运行时事件，Stopped 后于全部已提交事件。服务端应追踪 Ready、revision 和 Stopped，并检查非法或空的 oneof；生成绑定本身不执行状态校验。
 
@@ -125,14 +129,14 @@ proto 没有自定义错误消息。服务端可通过标准 gRPC status 拒绝�
 
 | 语言 | 路径 | 生成入口 |
 | --- | --- | --- |
-| Python | `packages/vfspy/src/vfspy/_rpc/` 下的 `session_pb2.py`、`session_pb2.pyi`、`session_pb2_grpc.py` | `pb.Config` 等消息，`rpc.ControllerServicer`、`rpc.add_ControllerServicer_to_server`、`rpc.ControllerStub` |
-| Go | `native/internal/rpc/session.pb.go`、`session_grpc.pb.go` | `rpc.NewControllerClient` 及消息类型；Go 生成包声明为 `rpc`，import 路径是 `anyvfs/native/internal/rpc` |
+| Python | `packages/vfspy/src/vfspy/_rpc/` 下各 proto 对应的 `*_pb2.py`、`*_pb2.pyi` 和服务绑定 `controller_pb2_grpc.py` | `bootstrap_pb2.Config` 等消息，`rpc.ControllerServicer`、`rpc.add_ControllerServicer_to_server`、`rpc.ControllerStub` |
+| Go | `native/internal/rpc/` 下各 proto 对应的 `*.pb.go` 和服务绑定 `controller_grpc.pb.go` | `rpc.NewControllerClient` 及消息类型，导入路径为 `anyvfs/native/internal/rpc` |
 
 Python 导入：
 
 ```python
-from vfspy._rpc import session_pb2 as pb
-from vfspy._rpc import session_pb2_grpc as rpc
+from vfspy._rpc import bootstrap_pb2, session_pb2
+from vfspy._rpc import controller_pb2_grpc as rpc
 ```
 
 1. 实现 `ControllerServicer.Bootstrap` 与 `Session`，加入鉴权、顺序检查和并行流处理。
@@ -140,4 +144,4 @@ from vfspy._rpc import session_pb2_grpc as rpc
 3. 以相同 token、端口、挂载点启动 Go，等待 Notice.ready 后使用挂载路径。
 4. 顺序处理 Event，关闭时遵循 Stop/Stopped 流程。
 
-在 `packages/vfspy/` 下运行 `uv run python scripts/generate_proto.py` 可从同一 proto 重新生成两种语言绑定。生成脚本会修正 Python 的相对导入。修改协议后应运行该脚本，确保 Go 与 Python 的服务名、消息类型及字段一致。
+在 `packages/vfspy/` 下运行 `uv run python scripts/generate_proto.py` 可重新生成 Go 和 Python 绑定。脚本会为 Python 绑定及类型存根使用包内相对导入。修改协议后应运行该脚本，确保两种语言的服务名、消息类型及字段一致。

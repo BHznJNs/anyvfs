@@ -1,6 +1,7 @@
 """Regenerate both language bindings with pinned generators."""
 
 import os
+import re
 import subprocess
 import sys
 
@@ -25,30 +26,45 @@ def main():
     python_out.mkdir(parents=True, exist_ok=True)
     go_out.mkdir(parents=True, exist_ok=True)
     suffix = ".exe" if os.name == "nt" else ""
+    sources = sorted(proto.glob("*.proto"))
+    protoc = [sys.executable, "-m", "grpc_tools.protoc", f"-I{proto}"]
     subprocess.run(
         [
-            sys.executable,
-            "-m",
-            "grpc_tools.protoc",
-            f"-I{proto}",
+            *protoc,
             f"--python_out={python_out}",
             f"--pyi_out={python_out}",
-            f"--grpc_python_out={python_out}",
             f"--plugin=protoc-gen-go={tool_bin / ('protoc-gen-go' + suffix)}",
-            f"--plugin=protoc-gen-go-grpc={tool_bin / ('protoc-gen-go-grpc' + suffix)}",
             f"--go_out={go_out}",
             "--go_opt=paths=source_relative",
-            f"--go-grpc_out={go_out}",
-            "--go-grpc_opt=paths=source_relative",
-            str(proto / "session.proto"),
+            *sources,
         ],
         check=True,
     )
-    binding = python_out / "session_pb2_grpc.py"
-    binding.write_text(
-        binding.read_text().replace("import session_pb2 as", "from . import session_pb2 as"),
-        encoding="utf-8",
+    subprocess.run(
+        [
+            *protoc,
+            f"--grpc_python_out={python_out}",
+            f"--plugin=protoc-gen-go-grpc={tool_bin / ('protoc-gen-go-grpc' + suffix)}",
+            f"--go-grpc_out={go_out}",
+            "--go-grpc_opt=paths=source_relative",
+            proto / "controller.proto",
+        ],
+        check=True,
     )
+
+    bindings = [
+        *python_out.glob("*_pb2.py"),
+        *python_out.glob("*_pb2.pyi"),
+        python_out / "controller_pb2_grpc.py",
+    ]
+    for binding in bindings:
+        contents = binding.read_text(encoding="utf-8")
+        contents = re.sub(r"^import (\w+_pb2) as ", r"from . import \1 as ", contents, flags=re.M)
+        binding.write_text(contents, encoding="utf-8")
+
+    # Remove obsolete service bindings from checkouts generated before the split.
+    (python_out / "session_pb2_grpc.py").unlink(missing_ok=True)
+    (go_out / "session_grpc.pb.go").unlink(missing_ok=True)
     (python_out / "__init__.py").touch()
 
 

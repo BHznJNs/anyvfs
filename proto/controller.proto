@@ -1,0 +1,15 @@
+syntax = "proto3";
+package anyvfs;
+option go_package = "anyvfs/native/internal/rpc;rpc";
+
+import "bootstrap.proto";
+import "dynamic.proto";
+import "session.proto";
+
+// Static entries are served in Go. Dynamic entries fetch snapshots from the controller.
+service Controller {
+  rpc Bootstrap(Empty) returns (stream BootstrapItem);
+  rpc Session(stream Notice) returns (stream Command);
+  rpc ListDynamicDirectory(DynamicPathRequest) returns (DynamicDirectoryListing);
+  rpc ReadDynamicFile(DynamicPathRequest) returns (DynamicFileContent);
+}

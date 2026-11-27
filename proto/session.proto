@@ -2,59 +2,7 @@ syntax = "proto3";
 package anyvfs;
 option go_package = "anyvfs/native/internal/rpc;rpc";
 
-// Static entries are served in Go. Dynamic entries fetch snapshots from the controller.
-service Controller {
-  rpc Bootstrap(Empty) returns (stream BootstrapItem);
-  rpc Session(stream Notice) returns (stream Command);
-  rpc ListDynamicDirectory(DynamicPathRequest) returns (DynamicDirectoryListing);
-  rpc ReadDynamicFile(DynamicPathRequest) returns (DynamicFileContent);
-}
-message Empty {}
-message Config {
-  bool case_sensitive = 1;
-  int64 max_file_bytes = 2;
-  int64 max_total_bytes = 3;
-}
-message InitialFile { string path = 1; bytes data = 2; }
-message InitialDirectory { string path = 1; }
-
-// Bootstrap registers mount-relative absolute paths without invoking their callbacks.
-message InitialDynamicFile { string path = 1; }
-message InitialDynamicDirectory { string path = 1; }
-message BootstrapItem {
-  oneof value {
-    Config config = 1;
-    InitialFile file = 2;
-    InitialDirectory directory = 3;
-    InitialDynamicFile dynamic_file = 4;
-    InitialDynamicDirectory dynamic_directory = 5;
-  }
-}
-
-// Use the absolute path within the mount, with names from bootstrap and directory listings.
-// Callback failures are reported as non-OK gRPC statuses for the individual call.
-message DynamicPathRequest { string path = 1; }
-
-message DynamicChild {
-  enum Kind {
-    KIND_UNSPECIFIED = 0;
-    KIND_FILE = 1;
-    KIND_DIRECTORY = 2;
-  }
-
-  // A single relative path component under the directory being listed.
-  string name = 1;
-  // Must be KIND_FILE or KIND_DIRECTORY.
-  Kind kind = 2;
-}
-
-// A complete snapshot of direct children. An empty list represents an empty directory.
-// Validate the entire list before using it, including name uniqueness under the mount's case rules.
-message DynamicDirectoryListing { repeated DynamicChild children = 1; }
-
-// The complete content snapshot for one open handle, requested on its first read.
-// Empty bytes represent an empty file.
-message DynamicFileContent { bytes data = 1; }
+import "events.proto";
 
 message Ready {}
 message Stopped {}
@@ -62,35 +10,4 @@ message Stop {}
 message Command { oneof value { Stop stop = 1; } }
 message Notice {
   oneof value { Ready ready = 1; Event event = 2; Stopped stopped = 3; }
-}
-message FileCreated { string path = 1; uint32 mode = 2; }
-message DirectoryCreated { string path = 1; uint32 mode = 2; }
-message FileWritten {
-  string path = 1; int64 offset = 2; bytes data = 3; int64 size = 4; bool linked = 5;
-}
-message FileTruncated {
-  string path = 1; int64 previous_size = 2; int64 size = 3; bool linked = 4;
-}
-message EntryRenamed {
-  string path = 1; string new_path = 2; bool directory = 3; uint64 replaced_inode = 4;
-}
-message FileRemoved { string path = 1; }
-message DirectoryRemoved { string path = 1; }
-message ModeChanged { string path = 1; uint32 mode = 2; }
-message OwnerChanged { string path = 1; uint32 uid = 2; uint32 gid = 3; }
-message TimesChanged { string path = 1; int64 atime_ns = 2; int64 mtime_ns = 3; }
-message Event {
-  uint64 revision = 1; int64 time_ns = 2; uint64 inode = 3;
-  oneof kind {
-    FileCreated file_created = 10;
-    DirectoryCreated directory_created = 11;
-    FileWritten file_written = 12;
-    FileTruncated file_truncated = 13;
-    EntryRenamed entry_renamed = 14;
-    FileRemoved file_removed = 15;
-    DirectoryRemoved directory_removed = 16;
-    ModeChanged mode_changed = 17;
-    OwnerChanged owner_changed = 18;
-    TimesChanged times_changed = 19;
-  }
 }

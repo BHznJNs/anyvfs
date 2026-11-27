@@ -1,0 +1,25 @@
+syntax = "proto3";
+package anyvfs;
+option go_package = "anyvfs/native/internal/rpc;rpc";
+
+message Empty {}
+message Config {
+  bool case_sensitive = 1;
+  int64 max_file_bytes = 2;
+  int64 max_total_bytes = 3;
+}
+message InitialFile { string path = 1; bytes data = 2; }
+message InitialDirectory { string path = 1; }
+
+// Bootstrap registers mount-relative absolute paths without invoking their callbacks.
+message InitialDynamicFile { string path = 1; }
+message InitialDynamicDirectory { string path = 1; }
+message BootstrapItem {
+  oneof value {
+    Config config = 1;
+    InitialFile file = 2;
+    InitialDirectory directory = 3;
+    InitialDynamicFile dynamic_file = 4;
+    InitialDynamicDirectory dynamic_directory = 5;
+  }
+}

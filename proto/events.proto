@@ -1,0 +1,35 @@
+syntax = "proto3";
+package anyvfs;
+option go_package = "anyvfs/native/internal/rpc;rpc";
+
+message FileCreated { string path = 1; uint32 mode = 2; }
+message DirectoryCreated { string path = 1; uint32 mode = 2; }
+message FileWritten {
+  string path = 1; int64 offset = 2; bytes data = 3; int64 size = 4; bool linked = 5;
+}
+message FileTruncated {
+  string path = 1; int64 previous_size = 2; int64 size = 3; bool linked = 4;
+}
+message EntryRenamed {
+  string path = 1; string new_path = 2; bool directory = 3; uint64 replaced_inode = 4;
+}
+message FileRemoved { string path = 1; }
+message DirectoryRemoved { string path = 1; }
+message ModeChanged { string path = 1; uint32 mode = 2; }
+message OwnerChanged { string path = 1; uint32 uid = 2; uint32 gid = 3; }
+message TimesChanged { string path = 1; int64 atime_ns = 2; int64 mtime_ns = 3; }
+message Event {
+  uint64 revision = 1; int64 time_ns = 2; uint64 inode = 3;
+  oneof kind {
+    FileCreated file_created = 10;
+    DirectoryCreated directory_created = 11;
+    FileWritten file_written = 12;
+    FileTruncated file_truncated = 13;
+    EntryRenamed entry_renamed = 14;
+    FileRemoved file_removed = 15;
+    DirectoryRemoved directory_removed = 16;
+    ModeChanged mode_changed = 17;
+    OwnerChanged owner_changed = 18;
+    TimesChanged times_changed = 19;
+  }
+}

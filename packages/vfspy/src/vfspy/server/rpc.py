@@ -3,7 +3,7 @@ from typing import Self
 
 import grpc
 
-from .._rpc import session_pb2_grpc as rpc
+from .._rpc import controller_pb2_grpc as rpc
 from .config import RpcServerConfig
 from .controller import RpcController, EventHandler
 

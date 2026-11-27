@@ -5,8 +5,8 @@ from typing import Awaitable, Callable
 
 import grpc
 
-from .._rpc import session_pb2 as pb
-from .._rpc import session_pb2_grpc as rpc
+from .._rpc import bootstrap_pb2, session_pb2
+from .._rpc import controller_pb2_grpc as rpc
 from ..utils.awaitable_or import AwaitableOr, resolve_awaitable_or
 from .config import RpcServerConfig
 from .errors import ProtocolError, SessionError
@@ -31,7 +31,7 @@ class SessionLifecycle:
     def stopped(self) -> asyncio.Event:
         return self._stopped_event
 
-    async def receive(self, notices: AsyncIterator[pb.Notice]):
+    async def receive(self, notices: AsyncIterator[session_pb2.Notice]):
         try:
             async for notice in notices:
                 await self._handle_notice(notice)
@@ -41,7 +41,7 @@ class SessionLifecycle:
             if not self._startup.done():
                 self._startup.set_exception(SessionError("Session ended before Ready"))
 
-    async def _handle_notice(self, notice: pb.Notice):
+    async def _handle_notice(self, notice: session_pb2.Notice):
         kind = notice.WhichOneof("value")
         match kind:
             case None:
@@ -89,8 +89,8 @@ class RpcController(rpc.ControllerServicer):
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "invalid session token")
 
     async def Bootstrap(  # noqa: N802
-        self, request: pb.Empty, context: grpc.aio.ServicerContext
-    ) -> AsyncIterator[pb.BootstrapItem]:
+        self, request: bootstrap_pb2.Empty, context: grpc.aio.ServicerContext
+    ) -> AsyncIterator[bootstrap_pb2.BootstrapItem]:
         await self._authorize(context)
         if self._bootstrapped:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Bootstrap already consumed")
@@ -100,7 +100,7 @@ class RpcController(rpc.ControllerServicer):
             yield item
 
     async def Session(  # noqa: N802
-        self, request_iterator: AsyncIterator[pb.Notice], context: grpc.aio.ServicerContext
+        self, request_iterator: AsyncIterator[session_pb2.Notice], context: grpc.aio.ServicerContext
     ):
         await self._authorize(context)
         if not self._bootstrapped:
@@ -110,7 +110,7 @@ class RpcController(rpc.ControllerServicer):
         self._session = SessionLifecycle(
             self._ready,
             self._on_event,
-            lambda: context.write(pb.Command(stop=pb.Stop())))
+            lambda: context.write(session_pb2.Command(stop=session_pb2.Stop())))
 
         try:
             await self._session.receive(request_iterator)

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Self, TypeAlias, cast
 
-from .._rpc import session_pb2 as pb
+from .._rpc import events_pb2 as pb
 from .errors import ProtocolError
 
 EventPayload: TypeAlias = (

@@ -4,7 +4,7 @@ Python 客户端的源码、测试和打包配置位于 `packages/vfspy/`。仓�
 
 ## 协议生成
 
-生成脚本需要 Go 和开发依赖，使用固定的 `grpcio-tools==1.78.0`、`protoc-gen-go@v1.36.6`、`protoc-gen-go-grpc@v1.5.1`，首次安装 Go 生成器需要下载依赖。Python 和 Go 的 RPC 生成文件不纳入 Git；首次检出或修改 `proto/session.proto` 后，需在导入 Python 绑定、运行 Go 测试或构建前执行生成脚本：
+生成脚本需要 Go 和开发依赖，使用固定的 `grpcio-tools==1.78.0`、`protoc-gen-go@v1.36.6`、`protoc-gen-go-grpc@v1.5.1`，首次安装 Go 生成器需要下载依赖。Python 和 Go 的 RPC 生成文件不纳入 Git。首次检出或修改 `proto/` 下的协议文件后，需在导入 Python 绑定、运行 Go 测试或构建前执行生成脚本。
 
 ```console
 uv run python scripts/generate_proto.py

@@ -58,8 +58,8 @@ jobs:
           uv run --isolated --no-project --python "${{ matrix.python-version }}" --with ./dist/*.whl python -I - <<'PY'
           import os
 
-          from vfspy._rpc import session_pb2 as pb
-          from vfspy._rpc import session_pb2_grpc as rpc
+          from vfspy._rpc import bootstrap_pb2 as pb
+          from vfspy._rpc import controller_pb2_grpc as rpc
           from vfspy.process._executable import bundled_bridge_executable
 
           config = pb.Config(case_sensitive=True, max_file_bytes=1024, max_total_bytes=4096)

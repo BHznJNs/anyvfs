@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import Field, StrictBool
 
-from .._rpc import session_pb2 as pb
+from .._rpc import bootstrap_pb2 as pb
 from ..utils.field import PositiveTimeout
 from ..utils.model import FrozenModel
 
